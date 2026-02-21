@@ -1,0 +1,10 @@
+{
+  "agents": [],
+  "skills": [],
+  "commands": [
+    "ship-ci-review-loop",
+    "ship-deployment",
+    "ship-error-handling",
+    "ship"
+  ]
+}
