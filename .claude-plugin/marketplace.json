@@ -1,0 +1,22 @@
+{
+  "name": "ship",
+  "description": "Complete PR workflow: commit to production, skips review when called from next-task, removes task from registry on cleanup, automatic rollback",
+  "version": "1.0.0",
+  "owner": {
+    "name": "Avi Fenesh",
+    "url": "https://github.com/avifenesh"
+  },
+  "repository": "https://github.com/agent-sh/ship",
+  "keywords": [
+    "ship"
+  ],
+  "plugins": [
+    {
+      "name": "ship",
+      "source": ".",
+      "description": "Complete PR workflow: commit to production, skips review when called from next-task, removes task from registry on cleanup, automatic rollback",
+      "version": "1.0.0",
+      "category": "deployment"
+    }
+  ]
+}
