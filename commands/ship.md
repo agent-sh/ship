@@ -350,7 +350,7 @@ echo "[OK] All comments resolved"
 
 # 3. Detect if running from a worktree
 IS_WORKTREE="false"
-if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
   IS_WORKTREE="true"
   echo "[INFO] Running from worktree - using remote-only merge strategy"
 fi
@@ -461,7 +461,7 @@ if (workflowState) {
 # Re-detect worktree in case Phase 6 was skipped or run separately
 if [ -z "$IS_WORKTREE" ]; then
   IS_WORKTREE="false"
-  if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+  if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
     IS_WORKTREE="true"
   fi
 fi
