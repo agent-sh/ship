@@ -348,17 +348,37 @@ fi
 
 echo "[OK] All comments resolved"
 
-# 3. Merge with strategy (default: squash)
-STRATEGY=${STRATEGY:-squash}
-gh pr merge $PR_NUMBER --$STRATEGY --delete-branch
+# 3. Detect if running from a worktree
+IS_WORKTREE="false"
+if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
+  IS_WORKTREE="true"
+  echo "[INFO] Running from worktree - using remote-only merge strategy"
+fi
 
-# Update local
-git checkout $MAIN_BRANCH
-git pull origin $MAIN_BRANCH
+# 4. Merge with strategy (default: squash)
+STRATEGY=${STRATEGY:-squash}
+if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
+  echo "[ERROR] Failed to extract repo owner/name"
+  exit 1
+fi
+
+if [ "$IS_WORKTREE" = "true" ]; then
+  # In worktree: merge without --delete-branch (it tries to checkout main locally)
+  gh pr merge $PR_NUMBER --$STRATEGY --repo "$OWNER/$REPO"
+  # Delete remote branch separately
+  git push origin --delete "$CURRENT_BRANCH" 2>&1 || echo "[WARN] Remote branch deletion failed - may need manual cleanup"
+  # Get merge SHA from the PR metadata (avoids race condition with fetch)
+  MERGE_SHA=$(gh pr view $PR_NUMBER --repo "$OWNER/$REPO" --json mergeCommit --jq '.mergeCommit.oid')
+else
+  gh pr merge $PR_NUMBER --$STRATEGY --delete-branch
+  # Update local
+  git checkout $MAIN_BRANCH
+  git pull origin $MAIN_BRANCH
+  MERGE_SHA=$(git rev-parse HEAD)
+fi
 
 # Update repo-map if it exists (non-blocking)
 node -e "const { getPluginRoot } = require('@agentsys/lib/cross-platform'); const pluginRoot = getPluginRoot('ship'); if (!pluginRoot) { console.log('Plugin root not found, skipping repo-map'); process.exit(0); } const repoMap = require(\`\${pluginRoot}/lib/repo-map\`); if (repoMap.exists(process.cwd())) { repoMap.update(process.cwd(), {}).then(() => console.log('[OK] Repo-map updated')).catch((e) => console.log('[WARN] Repo-map update failed: ' + e.message)); } else { console.log('Repo-map not found, skipping'); }" || true
-MERGE_SHA=$(git rev-parse HEAD)
 echo "[OK] Merged PR #$PR_NUMBER at $MERGE_SHA"
 ```
 </phase-6>
@@ -438,9 +458,20 @@ if (workflowState) {
 ### Local Branch Cleanup
 
 ```bash
-git checkout $MAIN_BRANCH
-# Feature branch already deleted by --delete-branch
-git branch -D $CURRENT_BRANCH 2>/dev/null || true
+# Re-detect worktree in case Phase 6 was skipped or run separately
+if [ -z "$IS_WORKTREE" ]; then
+  IS_WORKTREE="false"
+  if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
+    IS_WORKTREE="true"
+  fi
+fi
+
+if [ "$IS_WORKTREE" = "true" ]; then
+  echo "[OK] Local branch cleanup deferred (worktree mode - cleaned when worktree is removed)"
+else
+  git checkout $MAIN_BRANCH
+  git branch -D $CURRENT_BRANCH 2>/dev/null || true
+fi
 ```
 
 ## Phase 12: Completion Report
