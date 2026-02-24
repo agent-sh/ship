@@ -229,15 +229,15 @@ git push
 ```bash
 # Detect worktree
 IS_WORKTREE="false"
-if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
   IS_WORKTREE="true"
 fi
 
 if [ "$IS_WORKTREE" = "true" ]; then
   # In worktree: close PR and delete remote branch separately
   gh pr close $PR_NUMBER
-  git push origin --delete "$CURRENT_BRANCH" 2>/dev/null || true
-  echo "[OK] PR closed (worktree mode - local cleanup deferred)"
+  git push origin --delete "$CURRENT_BRANCH" 2>&1 || echo "[WARN] Remote branch deletion failed - may need manual cleanup"
+  echo "[OK] PR closed (worktree mode - local cleanup deferred to worktree removal)"
 else
   gh pr close $PR_NUMBER --delete-branch
   git checkout $MAIN_BRANCH

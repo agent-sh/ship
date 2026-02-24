@@ -357,14 +357,18 @@ fi
 
 # 4. Merge with strategy (default: squash)
 STRATEGY=${STRATEGY:-squash}
+if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
+  echo "[ERROR] Failed to extract repo owner/name"
+  exit 1
+fi
+
 if [ "$IS_WORKTREE" = "true" ]; then
   # In worktree: merge without --delete-branch (it tries to checkout main locally)
   gh pr merge $PR_NUMBER --$STRATEGY --repo "$OWNER/$REPO"
   # Delete remote branch separately
-  git push origin --delete "$CURRENT_BRANCH" 2>/dev/null || true
-  # Fetch to get merge SHA without checking out main
-  git fetch origin $MAIN_BRANCH
-  MERGE_SHA=$(git rev-parse origin/$MAIN_BRANCH)
+  git push origin --delete "$CURRENT_BRANCH" 2>&1 || echo "[WARN] Remote branch deletion failed - may need manual cleanup"
+  # Get merge SHA from the PR metadata (avoids race condition with fetch)
+  MERGE_SHA=$(gh pr view $PR_NUMBER --repo "$OWNER/$REPO" --json mergeCommit --jq '.mergeCommit.oid')
 else
   gh pr merge $PR_NUMBER --$STRATEGY --delete-branch
   # Update local
@@ -454,8 +458,16 @@ if (workflowState) {
 ### Local Branch Cleanup
 
 ```bash
+# Re-detect worktree in case Phase 6 was skipped or run separately
+if [ -z "$IS_WORKTREE" ]; then
+  IS_WORKTREE="false"
+  if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+    IS_WORKTREE="true"
+  fi
+fi
+
 if [ "$IS_WORKTREE" = "true" ]; then
-  echo "[OK] Skipping local branch cleanup (worktree mode)"
+  echo "[OK] Local branch cleanup deferred (worktree mode - cleaned when worktree is removed)"
 else
   git checkout $MAIN_BRANCH
   git branch -D $CURRENT_BRANCH 2>/dev/null || true
