@@ -186,6 +186,18 @@ Proceeding to production...
 ```bash
 echo "Merging $MAIN_BRANCH → $PROD_BRANCH..."
 
+# Worktree check - multi-branch deployment requires branch checkout
+IS_WORKTREE="false"
+if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+  IS_WORKTREE="true"
+fi
+
+if [ "$IS_WORKTREE" = "true" ]; then
+  echo "[ERROR] Multi-branch deployment is not supported from a worktree"
+  echo "Run deployment from the main repo directory instead"
+  exit 1
+fi
+
 git checkout $PROD_BRANCH
 git pull origin $PROD_BRANCH
 
@@ -286,6 +298,14 @@ rollback_production() {
   echo "========================================"
   echo "ROLLBACK INITIATED"
   echo "========================================"
+
+  # Worktree check
+  if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+    echo "[ERROR] Rollback is not supported from a worktree"
+    echo "Run rollback from the main repo directory instead"
+    exit 1
+  fi
+
   echo "WARNING: Force pushing to $PROD_BRANCH to revert"
 
   git checkout $PROD_BRANCH

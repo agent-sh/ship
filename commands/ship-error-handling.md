@@ -227,12 +227,22 @@ git push
 ### Cancel and Cleanup
 
 ```bash
-# If you need to abandon the PR
-gh pr close $PR_NUMBER --delete-branch
+# Detect worktree
+IS_WORKTREE="false"
+if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then
+  IS_WORKTREE="true"
+fi
 
-# Clean up local
-git checkout $MAIN_BRANCH
-git branch -D $CURRENT_BRANCH
+if [ "$IS_WORKTREE" = "true" ]; then
+  # In worktree: close PR and delete remote branch separately
+  gh pr close $PR_NUMBER
+  git push origin --delete "$CURRENT_BRANCH" 2>/dev/null || true
+  echo "[OK] PR closed (worktree mode - local cleanup deferred)"
+else
+  gh pr close $PR_NUMBER --delete-branch
+  git checkout $MAIN_BRANCH
+  git branch -D $CURRENT_BRANCH
+fi
 ```
 
 ## Exit Codes
