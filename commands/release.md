@@ -7,18 +7,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git:*), Bash(npm:*), Bash(car
 
 # /release - Versioned Release Workflow
 
-Create a versioned release by first discovering how the repository releases, then executing the appropriate method.
-
-## Constraints
-
-- MUST discover release method before executing
-- MUST run tests before tagging
-- MUST abort and revert version bump if tests fail
-- Plain text output, no emojis
-
-## Execution
-
-Spawn the release agent to handle discovery and execution:
+Spawn the release agent to discover how this repo releases and execute it.
 
 ```
 Task:
@@ -26,23 +15,7 @@ Task:
   prompt: |
     Perform a release in this repository.
     Arguments: $ARGUMENTS
-
-    Follow the release-agent workflow:
-    1. Discover how this repo releases (tool configs, CI workflows, scripts, manifests)
-    2. Build a release profile
-    3. Execute the release using the discovered method
-    4. If method is "manual" (no tool/script found), invoke the release skill
-
-    Report the result.
+    Follow the release-agent workflow. Report the result.
 ```
 
-## Error Handling
-
-| Error | Response |
-|---|---|
-| Not on main branch | `[ERROR] Must be on {main} to release (currently on {branch})` |
-| No release method found | `[ERROR] Cannot determine release method. No manifests, tools, or scripts found.` |
-| Tests failed | `[ERROR] Tests failed - aborting release. Version bump reverted.` |
-| Tag already exists | `[ERROR] Tag {tag} already exists` |
-| Publish failed | `[WARN] Release created but publish failed: {error}` |
-| Tool not installed | `[ERROR] Release tool {tool} not installed. Install with: {install command}` |
+See `agents/release-agent.md` for discovery logic, constraints, and error handling.
