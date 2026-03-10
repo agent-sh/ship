@@ -10,12 +10,6 @@ disable-model-invocation: true
 
 Generic release workflow used as a fallback when no dedicated release tool (semantic-release, release-it, goreleaser, etc.) is configured. Called by the release-agent after discovery.
 
-## When to Use
-
-This skill is invoked by `release-agent` with `method: "manual"` - meaning no release tool config or release script was found. The agent passes a `--profile=` argument with the discovery results.
-
-For repos that already use a release tool, the agent delegates to that tool directly and does NOT invoke this skill.
-
 ## Arguments
 
 Parse from `$ARGUMENTS`:
@@ -79,8 +73,6 @@ CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || e
 ```bash
 CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed 's/-SNAPSHOT//')
 ```
-
-**Other ecosystems**: Read version from the manifest file identified in the profile.
 
 ### Phase 3: Calculate New Version
 
@@ -203,7 +195,7 @@ gh release create "{tagPrefix}{newVersion}" \
   --latest
 ```
 
-### Phase 10: Publish (Optional)
+### Phase 10: Publish
 
 Skip if `--skip-publish` or if ecosystem is tag-only (go, packagist, swift).
 
