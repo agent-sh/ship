@@ -1,7 +1,7 @@
 ---
 description: Complete PR workflow from commit to production with validation
 codex-description: 'Use when user asks to "ship this", "create PR", "merge to main", "deploy changes", "push to production". Complete PR workflow: commit, create PR, monitor CI, merge, deploy, validate.'
-argument-hint: "[--strategy STRATEGY] [--skip-tests] [--dry-run] [--state-file PATH]"
+argument-hint: "[--strategy STRATEGY] [--skip-tests] [--dry-run] [--state-file PATH] [--base BRANCH]"
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(npm:*), Bash(node:*), Read, Write, Edit, Glob, Grep, Task
 ---
 
@@ -59,6 +59,7 @@ When called from `/next-task` workflow (via `--state-file`):
 - **SKIPS Phase 5** internal review agents (already done by Phase 9 review loop)
 - **SKIPS deslop/docs** (already done by deslop:deslop-agent, sync-docs:sync-docs-agent)
 - **Trusts** that all quality gates passed
+- **Reads `git.baseBranch`** from flow state to determine PR target branch
 
 **CRITICAL: Phase 4 ALWAYS runs** - even from /next-task. External auto-reviewers (Gemini, Copilot, CodeRabbit) comment AFTER PR creation and must be addressed.
 
@@ -71,6 +72,7 @@ Parse from $ARGUMENTS:
 - **--skip-tests**: Skip test validation (dangerous)
 - **--dry-run**: Show what would happen without executing
 - **--state-file**: Path to workflow state file (for /next-task integration)
+- **--base**: Override target branch for PR (default: repo default branch). When `--state-file` is provided, reads `git.baseBranch` from flow state if `--base` is not explicitly set.
 
 ## State Integration
 
@@ -81,9 +83,20 @@ if (!pluginRoot) { console.error('Error: Could not locate ship plugin root'); pr
 
 const args = '$ARGUMENTS'.split(' ');
 const stateIdx = args.indexOf('--state-file');
+const baseIdx = args.indexOf('--base');
 let workflowState = null;
+let baseBranchOverride = baseIdx >= 0 ? args[baseIdx + 1] : null;
+
+// Always try to read flow state (even without --state-file, check the state dir)
 if (stateIdx >= 0) {
   workflowState = require(`${pluginRoot}/lib/state/workflow-state.js`);
+}
+
+// Resolve baseBranch from all available sources
+if (!baseBranchOverride) {
+  // Check flow state for baseBranch (set by /next-task --base)
+  const flow = workflowState?.readFlow?.() || workflowState?.readState?.();
+  if (flow?.git?.baseBranch) baseBranchOverride = flow.git.baseBranch;
 }
 
 function updatePhase(phase, result) {
@@ -107,6 +120,24 @@ DEPLOYMENT=$(echo $PLATFORM | jq -r '.deployment')
 BRANCH_STRATEGY=$(echo $PLATFORM | jq -r '.branchStrategy')
 MAIN_BRANCH=$(echo $PLATFORM | jq -r '.mainBranch')
 
+# Resolve target branch: explicit --base > flow state > platform default
+DEFAULT_BRANCH="$MAIN_BRANCH"
+if [ -n "$baseBranchOverride" ] && [ "$baseBranchOverride" != "$MAIN_BRANCH" ]; then
+  MAIN_BRANCH="$baseBranchOverride"
+fi
+```
+
+**Target branch validation**: If `MAIN_BRANCH` differs from `DEFAULT_BRANCH` (repo default), confirm with the user before proceeding:
+
+```
+[WARN] PR target is {MAIN_BRANCH}, not the repo default ({DEFAULT_BRANCH}).
+       Source: {--base flag | workflow state}
+       Continue shipping to {MAIN_BRANCH}? (y/n)
+```
+
+If the user declines, fall back to `DEFAULT_BRANCH`. If running from `/next-task` with `--state-file` (automated), trust the flow state without prompting.
+
+```bash
 # Check required tools
 GH_AVAILABLE=$(echo $TOOLS | jq -r '.gh.available')
 if [ "$GH_AVAILABLE" != "true" ]; then
