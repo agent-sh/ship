@@ -3,6 +3,7 @@ name: release
 description: "Generic release workflow for repositories without a dedicated release tool. Handles version bump, changelog, test, tag, push, GitHub release, and optional publish."
 version: 0.2.0
 argument-hint: "[patch|minor|major] [--dry-run] [--skip-publish] [--skip-changelog] [--profile=JSON]"
+disable-model-invocation: true
 ---
 
 # release
@@ -117,7 +118,7 @@ npm version $NEW_VERSION --no-git-tag-version
 
 **cargo** (single crate):
 ```bash
-sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
+sed -i "s|^version = \"$CURRENT_VERSION\"|version = \"$NEW_VERSION\"|" Cargo.toml
 cargo check 2>/dev/null || true
 ```
 
@@ -125,7 +126,7 @@ cargo check 2>/dev/null || true
 
 **python** (pyproject.toml):
 ```bash
-sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+sed -i "s|version = \"$CURRENT_VERSION\"|version = \"$NEW_VERSION\"|" pyproject.toml
 ```
 
 **go**: No manifest to bump (version is tag-only).

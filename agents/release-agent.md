@@ -1,8 +1,30 @@
 ---
 name: release-agent
 model: sonnet
-description: "Discover how a repository releases, then perform the release."
-tools: Read, Glob, Grep, Bash(git:*), Bash(npm:*), Bash(cargo:*), Bash(go:*), Bash(python:*), Bash(pip:*), Bash(twine:*), Bash(mvn:*), Bash(gradle:*), Bash(gh:*), Bash(make:*), Bash(node:*), Bash(npx:*), Bash(sed:*), Bash(just:*), Bash(goreleaser:*), Edit, Write, Skill
+description: "Use when releasing a new version. Discovers how the repository releases, then performs the release."
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash(git:*)
+  - Bash(npm:*)
+  - Bash(cargo:*)
+  - Bash(go:*)
+  - Bash(python:*)
+  - Bash(pip:*)
+  - Bash(twine:*)
+  - Bash(mvn:*)
+  - Bash(gradle:*)
+  - Bash(gh:*)
+  - Bash(make:*)
+  - Bash(node:*)
+  - Bash(npx:*)
+  - Bash(sed:*)
+  - Bash(just:*)
+  - Bash(goreleaser:*)
+  - Edit
+  - Write
+  - Skill
 ---
 
 # release-agent
