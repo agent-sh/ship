@@ -117,17 +117,14 @@ npm version $NEW_VERSION --no-git-tag-version
 ```
 
 **cargo** (single crate):
-```bash
-sed -i "s|^version = \"$CURRENT_VERSION\"|version = \"$NEW_VERSION\"|" Cargo.toml
-cargo check 2>/dev/null || true
-```
+
+Use the Edit tool to replace `version = "{CURRENT}"` with `version = "{NEW}"` in Cargo.toml, then run `cargo check` to update Cargo.lock.
 
 **cargo workspace**: Bump workspace version in root Cargo.toml. Individual crates matching the old version should also be bumped.
 
 **python** (pyproject.toml):
-```bash
-sed -i "s|version = \"$CURRENT_VERSION\"|version = \"$NEW_VERSION\"|" pyproject.toml
-```
+
+Use the Edit tool to replace `version = "{CURRENT}"` with `version = "{NEW}"` in pyproject.toml.
 
 **go**: No manifest to bump (version is tag-only).
 
