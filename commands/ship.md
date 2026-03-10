@@ -1,7 +1,7 @@
 ---
 description: Complete PR workflow from commit to production with validation
 codex-description: 'Use when user asks to "ship this", "create PR", "merge to main", "deploy changes", "push to production". Complete PR workflow: commit, create PR, monitor CI, merge, deploy, validate.'
-argument-hint: "[--strategy STRATEGY] [--skip-tests] [--dry-run] [--state-file PATH]"
+argument-hint: "[--strategy STRATEGY] [--skip-tests] [--dry-run] [--state-file PATH] [--base BRANCH]"
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(npm:*), Bash(node:*), Read, Write, Edit, Glob, Grep, Task
 ---
 
@@ -71,6 +71,7 @@ Parse from $ARGUMENTS:
 - **--skip-tests**: Skip test validation (dangerous)
 - **--dry-run**: Show what would happen without executing
 - **--state-file**: Path to workflow state file (for /next-task integration)
+- **--base**: Override target branch for PR (default: repo default branch). When `--state-file` is provided, reads `git.baseBranch` from flow state if `--base` is not explicitly set.
 
 ## State Integration
 
@@ -81,9 +82,17 @@ if (!pluginRoot) { console.error('Error: Could not locate ship plugin root'); pr
 
 const args = '$ARGUMENTS'.split(' ');
 const stateIdx = args.indexOf('--state-file');
+const baseIdx = args.indexOf('--base');
 let workflowState = null;
+let baseBranchOverride = baseIdx >= 0 ? args[baseIdx + 1] : null;
+
 if (stateIdx >= 0) {
   workflowState = require(`${pluginRoot}/lib/state/workflow-state.js`);
+  // Read baseBranch from flow state if --base not explicitly set
+  if (!baseBranchOverride) {
+    const flow = workflowState.readFlow?.() || workflowState.readState?.();
+    if (flow?.git?.baseBranch) baseBranchOverride = flow.git.baseBranch;
+  }
 }
 
 function updatePhase(phase, result) {
@@ -106,6 +115,12 @@ CI_PLATFORM=$(echo $PLATFORM | jq -r '.ci')
 DEPLOYMENT=$(echo $PLATFORM | jq -r '.deployment')
 BRANCH_STRATEGY=$(echo $PLATFORM | jq -r '.branchStrategy')
 MAIN_BRANCH=$(echo $PLATFORM | jq -r '.mainBranch')
+
+# Override with --base or flow state baseBranch
+if [ -n "$baseBranchOverride" ]; then
+  MAIN_BRANCH="$baseBranchOverride"
+  echo "[OK] Target branch overridden to: $MAIN_BRANCH"
+fi
 
 # Check required tools
 GH_AVAILABLE=$(echo $TOOLS | jq -r '.gh.available')
