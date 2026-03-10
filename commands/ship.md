@@ -59,6 +59,7 @@ When called from `/next-task` workflow (via `--state-file`):
 - **SKIPS Phase 5** internal review agents (already done by Phase 9 review loop)
 - **SKIPS deslop/docs** (already done by deslop:deslop-agent, sync-docs:sync-docs-agent)
 - **Trusts** that all quality gates passed
+- **Reads `git.baseBranch`** from flow state to determine PR target branch
 
 **CRITICAL: Phase 4 ALWAYS runs** - even from /next-task. External auto-reviewers (Gemini, Copilot, CodeRabbit) comment AFTER PR creation and must be addressed.
 
@@ -86,13 +87,16 @@ const baseIdx = args.indexOf('--base');
 let workflowState = null;
 let baseBranchOverride = baseIdx >= 0 ? args[baseIdx + 1] : null;
 
+// Always try to read flow state (even without --state-file, check the state dir)
 if (stateIdx >= 0) {
   workflowState = require(`${pluginRoot}/lib/state/workflow-state.js`);
-  // Read baseBranch from flow state if --base not explicitly set
-  if (!baseBranchOverride) {
-    const flow = workflowState.readFlow?.() || workflowState.readState?.();
-    if (flow?.git?.baseBranch) baseBranchOverride = flow.git.baseBranch;
-  }
+}
+
+// Resolve baseBranch from all available sources
+if (!baseBranchOverride) {
+  // Check flow state for baseBranch (set by /next-task --base)
+  const flow = workflowState?.readFlow?.() || workflowState?.readState?.();
+  if (flow?.git?.baseBranch) baseBranchOverride = flow.git.baseBranch;
 }
 
 function updatePhase(phase, result) {
@@ -116,12 +120,24 @@ DEPLOYMENT=$(echo $PLATFORM | jq -r '.deployment')
 BRANCH_STRATEGY=$(echo $PLATFORM | jq -r '.branchStrategy')
 MAIN_BRANCH=$(echo $PLATFORM | jq -r '.mainBranch')
 
-# Override with --base or flow state baseBranch
-if [ -n "$baseBranchOverride" ]; then
+# Resolve target branch: explicit --base > flow state > platform default
+DEFAULT_BRANCH="$MAIN_BRANCH"
+if [ -n "$baseBranchOverride" ] && [ "$baseBranchOverride" != "$MAIN_BRANCH" ]; then
   MAIN_BRANCH="$baseBranchOverride"
-  echo "[OK] Target branch overridden to: $MAIN_BRANCH"
 fi
+```
 
+**Target branch validation**: If `MAIN_BRANCH` differs from `DEFAULT_BRANCH` (repo default), confirm with the user before proceeding:
+
+```
+[WARN] PR target is {MAIN_BRANCH}, not the repo default ({DEFAULT_BRANCH}).
+       Source: {--base flag | workflow state}
+       Continue shipping to {MAIN_BRANCH}? (y/n)
+```
+
+If the user declines, fall back to `DEFAULT_BRANCH`. If running from `/next-task` with `--state-file` (automated), trust the flow state without prompting.
+
+```bash
 # Check required tools
 GH_AVAILABLE=$(echo $TOOLS | jq -r '.gh.available')
 if [ "$GH_AVAILABLE" != "true" ]; then
