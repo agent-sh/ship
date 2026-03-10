@@ -91,7 +91,7 @@ In workflow files, grep for patterns indicating a release job:
 - `gh release create`
 - Triggers on tag push (`tags: ['v*']`)
 
-If found: note the CI release workflow for reference but continue discovery (CI may not be the interactive release method).
+If found: note the CI release workflow for reference but continue discovery.
 
 ### 1c. Script-Based Release
 
@@ -151,8 +151,6 @@ Glob: CHANGELOG.md, CHANGELOG*, CHANGES.md, HISTORY.md, NEWS.md
 ```
 
 ## Phase 2: Build Release Profile
-
-Synthesize discovery into a release profile:
 
 ```json
 {
