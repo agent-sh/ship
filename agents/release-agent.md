@@ -43,16 +43,15 @@ Discover how a repository releases, then perform the release. Uses a discovery-f
 
 ## Arguments
 
-Receive from the spawning command:
+Parse from `$ARGUMENTS`:
 
-```javascript
-const args = '$ARGUMENTS'.trim().split(/\s+/).filter(Boolean);
-const bump = args.find(a => ['patch', 'minor', 'major'].includes(a)) || 'patch';
-const dryRun = args.includes('--dry-run');
-const skipPublish = args.includes('--skip-publish');
-const skipChangelog = args.includes('--skip-changelog');
-const autoConfirm = args.includes('--yes');
-```
+| Argument | Values | Default |
+|---|---|---|
+| bump | patch, minor, major | patch |
+| `--dry-run` | flag | - |
+| `--skip-publish` | flag | - |
+| `--skip-changelog` | flag | - |
+| `--yes` | flag | - |
 
 ## Phase 1: Discovery
 
@@ -114,21 +113,21 @@ If found: the script IS the release method. Skip to Phase 2 with `method: "scrip
 
 Detect the ecosystem from manifest files:
 
-| File | Ecosystem | Version Location | Publish Command |
-|---|---|---|---|
-| `package.json` | npm | `.version` field | `npm publish` |
-| `Cargo.toml` | cargo | `version = "x.y.z"` | `cargo publish` |
-| `pyproject.toml` | python | `[project] version` or `[tool.poetry] version` | `twine upload` or `poetry publish` |
-| `setup.py` / `setup.cfg` | python-legacy | `version=` arg or field | `twine upload` |
-| `pom.xml` | maven | `<version>` element | `mvn deploy` |
-| `build.gradle` / `build.gradle.kts` | gradle | `version =` property | `gradle publish` |
-| `go.mod` | go | git tags only (no manifest version) | tag-only |
-| `*.gemspec` | rubygems | `spec.version` | `gem push` |
-| `*.csproj` | nuget | `<Version>` element | `dotnet nuget push` |
-| `pubspec.yaml` | dart | `version:` field | `dart pub publish` |
-| `composer.json` | packagist | `version` field (optional) | tag-only (packagist reads tags) |
-| `mix.exs` | hex | `version:` in project | `mix hex.publish` |
-| `Package.swift` | swift | git tags only | tag-only |
+| File | Ecosystem | Version Location |
+|---|---|---|
+| `package.json` | npm | `.version` field |
+| `Cargo.toml` | cargo | `version = "x.y.z"` |
+| `pyproject.toml` | python | `[project] version` or `[tool.poetry] version` |
+| `setup.py` / `setup.cfg` | python-legacy | `version=` arg or field |
+| `pom.xml` | maven | `<version>` element |
+| `build.gradle` / `build.gradle.kts` | gradle | `version =` property |
+| `go.mod` | go | git tags only (no manifest version) |
+| `*.gemspec` | rubygems | `spec.version` |
+| `*.csproj` | nuget | `<Version>` element |
+| `pubspec.yaml` | dart | `version:` field |
+| `composer.json` | packagist | `version` field (optional) |
+| `mix.exs` | hex | `version:` in project |
+| `Package.swift` | swift | git tags only |
 
 ### 1e. Version History
 
