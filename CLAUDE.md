@@ -3,12 +3,17 @@
 
 > Complete PR workflow from commit to production with validation
 
+## Agents
+
+- release-agent (sonnet) - discovers repo release method, then executes
+
 ## Commands
 
 - ship-ci-review-loop
 - ship-deployment
 - ship-error-handling
 - ship
+- release
 
 ## Critical Rules
 
