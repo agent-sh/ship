@@ -77,7 +77,7 @@ CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || e
 
 **maven** (pom.xml):
 ```bash
-CURRENT_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/' | sed 's/-SNAPSHOT//')
+CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed 's/-SNAPSHOT//')
 ```
 
 **Other ecosystems**: Read version from the manifest file identified in the profile.
@@ -216,7 +216,7 @@ Skip if `--skip-publish` or if ecosystem is tag-only (go, packagist, swift).
 | gradle | `gradle publish` |
 | rubygems | `gem build && gem push *.gem` |
 | nuget | `dotnet pack && dotnet nuget push` |
-| dart | `dart pub publish --force` |
+| dart | `dart pub publish` |
 | hex | `mix hex.publish` |
 
 For cargo workspace: publish crates in dependency order.

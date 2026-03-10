@@ -16,19 +16,6 @@ Create a versioned release by first discovering how the repository releases, the
 - MUST abort and revert version bump if tests fail
 - Plain text output, no emojis
 
-## Arguments
-
-Parse from `$ARGUMENTS`:
-
-```javascript
-const args = '$ARGUMENTS'.trim().split(/\s+/).filter(Boolean);
-const bump = args.find(a => ['patch', 'minor', 'major'].includes(a)) || 'patch';
-const dryRun = args.includes('--dry-run');
-const skipPublish = args.includes('--skip-publish');
-const skipChangelog = args.includes('--skip-changelog');
-const autoConfirm = args.includes('--yes');
-```
-
 ## Execution
 
 Spawn the release agent to handle discovery and execution:
@@ -39,10 +26,6 @@ Task:
   prompt: |
     Perform a release in this repository.
     Arguments: $ARGUMENTS
-    Bump level: {bump}
-    Dry run: {dryRun}
-    Skip publish: {skipPublish}
-    Skip changelog: {skipChangelog}
 
     Follow the release-agent workflow:
     1. Discover how this repo releases (tool configs, CI workflows, scripts, manifests)
@@ -57,9 +40,9 @@ Task:
 
 | Error | Response |
 |---|---|
-| Not on main branch | `[ERROR] Must be on main to release` |
+| Not on main branch | `[ERROR] Must be on {main} to release (currently on {branch})` |
 | No release method found | `[ERROR] Cannot determine release method. No manifests, tools, or scripts found.` |
 | Tests failed | `[ERROR] Tests failed - aborting release. Version bump reverted.` |
 | Tag already exists | `[ERROR] Tag {tag} already exists` |
 | Publish failed | `[WARN] Release created but publish failed: {error}` |
-| Tool not installed | `[ERROR] Release tool {tool} not installed` |
+| Tool not installed | `[ERROR] Release tool {tool} not installed. Install with: {install command}` |
