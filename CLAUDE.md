@@ -5,7 +5,11 @@
 
 ## Agents
 
-- release-agent (sonnet) - discovers repo release method, then executes
+- release-agent
+
+## Skills
+
+- release
 
 ## Commands
 
