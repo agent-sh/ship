@@ -53,6 +53,33 @@ Parse from `$ARGUMENTS`:
 | `--skip-changelog` | flag | - |
 | `--yes` | flag | - |
 
+## Pre-Release Health Check (Optional)
+
+Check if a repo-intel map is available and log informational health data. This step is purely informational - never block or abort a release based on health data.
+
+1. Detect the state directory by checking which exists: `.claude/`, `.opencode/`, `.codex/` (in that order)
+2. Check if `<stateDir>/repo-intel.json` exists
+3. If the map file does NOT exist, skip this step silently and proceed to Phase 1
+4. If the map file exists, run these queries via the agent-analyzer binary:
+
+```javascript
+const { binary } = require('@agentsys/lib');
+// health query
+const health = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'health', '--map-file', mapFile, cwd]));
+// bugspots query (top 5)
+const bugspots = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'bugspots', '--top', '5', '--map-file', mapFile, cwd]));
+```
+
+5. Log the health summary:
+   - `[INFO] Repo health: busFactor={busFactor}, aiRatio={aiRatio}` (from health query)
+   - For each bugspot with `bugFixRate > 0.5`: `[WARN] Top bugspot: {path} (bugFixRate={bugFixRate})`
+   - If no bugspots exceed the threshold, no warning is logged
+
+6. If the query fails (binary not available, map corrupt, etc.), log `[INFO] Repo health check skipped (query failed)` and continue
+
+Health query returns: `{active: boolean, busFactor: number, commitFrequency: number, aiRatio: number}`
+Bugspots query returns: `Array<{path: string, bugFixRate: number, totalChanges: number, bugFixes: number, lastBugFix: string|null}>`
+
 ## Phase 1: Discovery
 
 Search for release signals in this order. Stop early if a dedicated release tool is found.
