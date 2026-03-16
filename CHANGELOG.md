@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-03-16
+
 ### Added
 
 - feat: add discovery-first `/release` command with release-agent and release skill - supports 12+ ecosystems and 7 release tool configurations (#7)
+- feat: add pre-release health check from repo-intel (#13)
+- feat: pre-fetch health data in release command (#15)
 
 ### Fixed
 
