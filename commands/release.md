@@ -14,27 +14,38 @@ Pre-fetch repo health data (informational context for the release agent):
 ```javascript
 let healthContext = '';
 try {
-  const { getPluginRoot } = require('./lib/cross-platform');
-  const pluginRoot = getPluginRoot('ship');
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) throw new Error('CLAUDE_PLUGIN_ROOT not set');
   const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
-  if (!repoIntel) throw new Error('agentsys is too old (need v5.8.6+ for typed repo-intel queries) - run `/plugin marketplace update`');
-  const fs = require('fs');
-  const path = require('path');
-  const cwd = process.cwd();
-  const stateDir = ['.claude', '.opencode', '.codex'].find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
-  const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
+  if (!repoIntel) {
+    // Older agentsys (< v5.8.6) without the typed query module. Surface a
+    // visible note instead of silently skipping - the user can update with
+    // /plugin marketplace update and re-run if they want pre-release health
+    // data.
+    console.error('[INFO] Pre-release health check skipped: agentsys is older than v5.8.6 (run `/plugin marketplace update` to enable).');
+  } else {
+    const fs = require('fs');
+    const path = require('path');
+    const cwd = process.cwd();
+    const stateDir = ['.claude', '.opencode', '.codex'].find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
+    const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
 
-  if (fs.existsSync(mapFile)) {
-    const health = repoIntel.queries.health(cwd);
-    const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });
-    healthContext = `\n\nPre-release health (informational only, do not block release):`;
-    healthContext += `\nBus factor: ${health.busFactor}, AI ratio: ${(health.aiRatio * 100).toFixed(1)}%`;
-    const highBugs = bugspots.filter(b => b.bugFixRate > 0.5);
-    if (highBugs.length > 0) {
-      healthContext += '\nHigh bugspot files: ' + highBugs.map(b => `${b.path} (${(b.bugFixRate * 100).toFixed(0)}% fix rate)`).join(', ');
+    if (fs.existsSync(mapFile)) {
+      const health = repoIntel.queries.health(cwd);
+      const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });
+      healthContext = `\n\nPre-release health (informational only, do not block release):`;
+      healthContext += `\nBus factor: ${health.busFactor}, AI ratio: ${(health.aiRatio * 100).toFixed(1)}%`;
+      const highBugs = bugspots.filter(b => b.bugFixRate > 0.5);
+      if (highBugs.length > 0) {
+        healthContext += '\nHigh bugspot files: ' + highBugs.map(b => `${b.path} (${(b.bugFixRate * 100).toFixed(0)}% fix rate)`).join(', ');
+      }
     }
   }
-} catch (e) { /* unavailable */ }
+} catch (e) {
+  // Health check is informational - log the cause so users know why it
+  // failed (rather than swallowing silently as the old code did).
+  console.error(`[INFO] Pre-release health check skipped: ${e.message}`);
+}
 ```
 
 ```

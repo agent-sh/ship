@@ -63,10 +63,10 @@ Check if a repo-intel map is available and log informational health data. This s
 4. If the map file exists, run these queries via the agent-analyzer binary:
 
 ```javascript
-const { getPluginRoot } = require('./lib/cross-platform');
-const pluginRoot = getPluginRoot('ship');
+const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+if (!pluginRoot) throw new Error('CLAUDE_PLUGIN_ROOT not set');
 const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
-if (!repoIntel) throw new Error('agentsys is too old (need v5.8.6+ for typed repo-intel queries) - run `/plugin marketplace update`');
+if (!repoIntel) throw new Error('agentsys is older than v5.8.6 (typed repo-intel queries unavailable) - run `/plugin marketplace update` and retry');
 const health = repoIntel.queries.health(cwd);
 const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });
 ```
