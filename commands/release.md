@@ -14,7 +14,10 @@ Pre-fetch repo health data (informational context for the release agent):
 ```javascript
 let healthContext = '';
 try {
-  const { binary } = require('@agentsys/lib');
+  const { getPluginRoot } = require('./lib/cross-platform');
+  const pluginRoot = getPluginRoot('ship');
+  const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
+  if (!repoIntel) throw new Error('agentsys is too old (need v5.8.6+ for typed repo-intel queries) - run `/plugin marketplace update`');
   const fs = require('fs');
   const path = require('path');
   const cwd = process.cwd();
@@ -22,8 +25,8 @@ try {
   const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
 
   if (fs.existsSync(mapFile)) {
-    const health = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'health', '--map-file', mapFile, cwd]));
-    const bugspots = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'bugspots', '--top', '5', '--map-file', mapFile, cwd]));
+    const health = repoIntel.queries.health(cwd);
+    const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });
     healthContext = `\n\nPre-release health (informational only, do not block release):`;
     healthContext += `\nBus factor: ${health.busFactor}, AI ratio: ${(health.aiRatio * 100).toFixed(1)}%`;
     const highBugs = bugspots.filter(b => b.bugFixRate > 0.5);

@@ -77,7 +77,7 @@ Parse from $ARGUMENTS:
 ## State Integration
 
 ```javascript
-const { getPluginRoot } = require('@agentsys/lib/cross-platform');
+const { getPluginRoot } = require('./lib/cross-platform');
 const pluginRoot = getPluginRoot('ship');
 if (!pluginRoot) { console.error('Error: Could not locate ship plugin root'); process.exit(1); }
 
@@ -110,7 +110,7 @@ function updatePhase(phase, result) {
 
 ```bash
 # Detect platform and project configuration
-PLUGIN_PATH=$(node -e "const { getPluginRoot, normalizePathForRequire } = require('@agentsys/lib/cross-platform'); const root = getPluginRoot('ship'); if (!root) { console.error('Error: Could not locate ship plugin root'); process.exit(1); } console.log(normalizePathForRequire(root));")
+PLUGIN_PATH=$(node -e "const { getPluginRoot, normalizePathForRequire } = require('./lib/cross-platform'); const root = getPluginRoot('ship'); if (!root) { console.error('Error: Could not locate ship plugin root'); process.exit(1); } console.log(normalizePathForRequire(root));")
 PLATFORM=$(node "$PLUGIN_PATH/lib/platform/detect-platform.js")
 TOOLS=$(node "$PLUGIN_PATH/lib/platform/verify-tools.js")
 
@@ -408,8 +408,8 @@ else
   MERGE_SHA=$(git rev-parse HEAD)
 fi
 
-# Update repo-map if it exists (non-blocking)
-node -e "const { getPluginRoot } = require('@agentsys/lib/cross-platform'); const pluginRoot = getPluginRoot('ship'); if (!pluginRoot) { console.log('Plugin root not found, skipping repo-map'); process.exit(0); } const repoMap = require(\`\${pluginRoot}/lib/repo-map\`); if (repoMap.exists(process.cwd())) { repoMap.update(process.cwd(), {}).then(() => console.log('[OK] Repo-map updated')).catch((e) => console.log('[WARN] Repo-map update failed: ' + e.message)); } else { console.log('Repo-map not found, skipping'); }" || true
+# Update repo-intel artifact if it exists (non-blocking)
+node -e "const { getPluginRoot } = require('./lib/cross-platform'); const pluginRoot = getPluginRoot('ship'); if (!pluginRoot) { console.log('Plugin root not found, skipping repo-intel update'); process.exit(0); } const { repoMap } = require(\`\${pluginRoot}/lib/agentsys\`).get(); if (!repoMap) { console.log('agentsys repo-map module unavailable, skipping repo-intel update'); process.exit(0); } if (repoMap.exists(process.cwd())) { repoMap.update(process.cwd(), {}).then(() => console.log('[OK] Repo-intel updated')).catch((e) => console.log('[WARN] Repo-intel update failed: ' + e.message)); } else { console.log('No cached repo-intel.json, skipping update'); }" || true
 echo "[OK] Merged PR #$PR_NUMBER at $MERGE_SHA"
 ```
 </phase-6>
