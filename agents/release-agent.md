@@ -57,6 +57,23 @@ Parse from `$ARGUMENTS`:
 
 Check if a repo-intel map is available and log informational health data. This step is purely informational - never block or abort a release based on health data.
 
+### What you're querying and why
+
+You're calling two `repoIntel.queries` functions on the cached `repo-intel.json`:
+
+- **`health(cwd)`** - repository-wide pulse. Returns `{ active, busFactor, commitFrequency, aiRatio }`:
+  - `busFactor` (integer): how many people you'd need to lose before knowledge of the codebase becomes critical. **`busFactor === 1` = single-contributor risk** (one person knows everything). 2-3 = small team. >5 = healthy spread.
+  - `aiRatio` (0..1): fraction of commits attributed to AI tools. High values (>0.6) on a release branch = consider whether a human spot-check happened.
+  - `commitFrequency` (commits/day): a near-zero value before a release means little recent activity to validate.
+  - `active` (bool): false = no commits in the last 30 days, surface as a stalled-repo warning.
+- **`bugspots(cwd, { limit: 5 })`** - the five files where the largest fraction of recent commits were bug fixes. Returns `Array<{ path, bugFixRate, totalChanges, bugFixes, lastBugFix }>`:
+  - `bugFixRate` (0..1): commits-fixing-bugs / total-commits on this file. **>0.5 means the file is fragile** - more than half of its recent change history is fixing prior bugs. Worth flagging in release notes / inviting an extra reviewer.
+  - `totalChanges` and `bugFixes` are the raw counters that give the rate context (a 0.6 rate over 5 commits is noisy; over 50 commits it's a real pattern).
+
+If neither signal flags anything, the repo is releasable without callouts. If either does, surface the warnings - they don't block release, they inform it.
+
+### Steps
+
 1. Detect the state directory by checking which exists: `.claude/`, `.opencode/`, `.codex/` (in that order)
 2. Check if `<stateDir>/repo-intel.json` exists
 3. If the map file does NOT exist, skip this step silently and proceed to Phase 1
@@ -67,19 +84,17 @@ const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
 if (!pluginRoot) throw new Error('CLAUDE_PLUGIN_ROOT not set');
 const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
 if (!repoIntel) throw new Error('agentsys is older than v5.8.6 (typed repo-intel queries unavailable) - run `/plugin marketplace update` and retry');
-const health = repoIntel.queries.health(cwd);
-const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });
+const health = repoIntel.queries.health(cwd);            // pulse: busFactor, aiRatio, etc.
+const bugspots = repoIntel.queries.bugspots(cwd, { limit: 5 });  // top 5 fragile files
 ```
 
 5. Log the health summary:
    - `[INFO] Repo health: busFactor={busFactor}, aiRatio={aiRatio}` (from health query)
    - For each bugspot with `bugFixRate > 0.5`: `[WARN] Top bugspot: {path} (bugFixRate={bugFixRate})`
    - If no bugspots exceed the threshold, no warning is logged
+   - Add `[WARN] Single-contributor risk` if `health.busFactor === 1`
 
 6. If the query fails (binary not available, map corrupt, etc.), log `[INFO] Repo health check skipped (query failed)` and continue
-
-Health query returns: `{active: boolean, busFactor: number, commitFrequency: number, aiRatio: number}`
-Bugspots query returns: `Array<{path: string, bugFixRate: number, totalChanges: number, bugFixes: number, lastBugFix: string|null}>`
 
 ## Phase 1: Discovery
 
@@ -279,3 +294,13 @@ Output the release summary:
 | Tag already exists | `[ERROR] Tag {tag} already exists` |
 | Publish failed | `[WARN] Release created but publish failed: {error}` |
 | Tool not installed | `[ERROR] Release tool {tool} not installed. Install with: {install command}` |
+
+
+## Repo-Intel Data
+
+**Expected:** the orchestrator (the command that spawned this agent) has already checked `<stateDir>/repo-intel.json` and either pre-fetched the data into your context or skipped (user declined to generate). **Do not call `AskUserQuestion` here** - subagents cannot interact with the user.
+
+**If the pre-fetched data is empty**, proceed with the available context. The orchestrator has already made the decision on the user's behalf.
+
+**Binary:** `agent-analyzer` auto-downloads to `~/.agent-sh/bin/` from `agent-sh/agent-analyzer` GitHub releases (~10 MB) on first use. The `lib/agentsys` resolver locates the agentsys install (CC marketplace clone, npm global, or sibling repo).
+
