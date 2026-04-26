@@ -126,26 +126,39 @@ fi
 
 ### Error Log Monitoring
 
+**Advisory**: This dev-stage block only blocks promotion-to-prod (`exit 1`),
+not a destructive force-push, so the risk is bounded. Still, the same
+log-keyword-count pattern is a DoS vector if user-controlled fields are
+logged. Prefer the platform health API as in Phase 10; treat this as a
+soft-advisory signal only.
+
 ```bash
-echo "Checking logs for errors..."
+echo "Checking dev deployment status (advisory)..."
 
+# Best-effort structured status from the platform API.
 if [ "$DEPLOYMENT" = "railway" ]; then
-  ERROR_COUNT=$(railway logs --tail 100 | grep -iE "(error|exception|fatal)" | wc -l)
+  DEV_STATUS=$(railway status --json 2>/dev/null | jq -r '.environment.status // "unknown"')
 elif [ "$DEPLOYMENT" = "vercel" ]; then
-  ERROR_COUNT=$(vercel logs $DEV_URL --since 5m | grep -iE "(error|exception|fatal)" | wc -l)
+  DEV_STATUS=$(vercel inspect "$DEV_URL" --json 2>/dev/null | jq -r '.readyState // "UNKNOWN"')
 elif [ "$DEPLOYMENT" = "netlify" ]; then
-  ERROR_COUNT=$(netlify logs --since 5m | grep -iE "(error|exception|fatal)" | wc -l)
+  DEV_STATUS=$(netlify api getDeploy --data "{ \"deploy_id\": \"$DEPLOY_ID\" }" 2>/dev/null | jq -r '.state // "unknown"')
 else
-  ERROR_COUNT=0
+  DEV_STATUS="unknown"
 fi
 
-if [ "$ERROR_COUNT" -gt 10 ]; then
-  echo "[ERROR] High error rate detected: $ERROR_COUNT errors in last 5 minutes"
-  echo "Review logs before proceeding to production"
-  exit 1
-else
-  echo "[OK] Error rate acceptable: $ERROR_COUNT errors"
-fi
+case "$DEV_STATUS" in
+  healthy|SUCCESS|running|READY|ready)
+    echo "[OK] Dev platform reports healthy: $DEV_STATUS"
+    ;;
+  unknown|UNKNOWN)
+    echo "[WARN] Dev platform status unknown (API unavailable). Relying on health check + smoke tests."
+    ;;
+  *)
+    echo "[ERROR] Dev platform reports unhealthy: $DEV_STATUS"
+    echo "Review deployment before proceeding to production"
+    exit 1
+    ;;
+esac
 ```
 
 ### Project Smoke Tests
@@ -173,7 +186,7 @@ fi
 
 **URL**: ${DEV_URL}
 **Health Check**: [OK] ${HTTP_STATUS}
-**Error Rate**: [OK] ${ERROR_COUNT} errors
+**Platform Status**: [OK] ${DEV_STATUS}
 **Smoke Tests**: [OK] Passed
 
 Proceeding to production...
@@ -252,20 +265,58 @@ fi
 
 ### Production Error Monitoring
 
+**Security note (rollback-DoS vector)**: Do NOT gate `rollback_production` on
+raw log-line counts of the words `error|exception|fatal`. Application logs
+regularly echo user-controlled data (request headers, query strings, bodies,
+auth identifiers). An attacker who can influence any logged field can inflate
+the match count past the threshold and force `rollback_production`, which
+performs `git reset --hard HEAD~1` + `git push --force-with-lease` against the
+production branch. This turns a grep heuristic into a remote rollback primitive.
+
+Use deploy-platform health APIs (structured, signed by the platform) as the
+authoritative signal. Fall back to CI exit-code history only when no platform
+API is available. Never fall back to keyword-density grep.
+
 ```bash
-echo "Monitoring production logs..."
+echo "Monitoring production status (via platform API, not log grep)..."
+
+PROD_STATUS="unknown"
 
 if [ "$DEPLOYMENT" = "railway" ]; then
-  ERROR_COUNT=$(railway logs --tail 100 | grep -iE "(error|exception|fatal)" | wc -l)
+  # Prefer structured status over log parsing.
+  PROD_STATUS=$(railway status --json 2>/dev/null | jq -r '.environment.status // "unknown"')
+  # Cross-check with a direct HTTP probe (already validated above, but
+  # re-probe here so a post-validation regression also triggers rollback).
+  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/health" || echo "000")
+  case "$PROD_STATUS" in
+    healthy|SUCCESS|running) ;;
+    *) PROD_STATUS="errored" ;;
+  esac
 elif [ "$DEPLOYMENT" = "vercel" ]; then
-  ERROR_COUNT=$(vercel logs $PROD_URL --since 5m | grep -iE "(error|exception|fatal)" | wc -l)
+  READY_STATE=$(vercel inspect "$PROD_URL" --json 2>/dev/null | jq -r '.readyState // "UNKNOWN"')
+  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/health" || echo "000")
+  [ "$READY_STATE" = "READY" ] && PROD_STATUS="healthy" || PROD_STATUS="errored"
+elif [ "$DEPLOYMENT" = "netlify" ]; then
+  NETLIFY_STATE=$(netlify api getDeploy --data "{ \"deploy_id\": \"$DEPLOY_ID\" }" 2>/dev/null | jq -r '.state // "unknown"')
+  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/health" || echo "000")
+  [ "$NETLIFY_STATE" = "ready" ] && PROD_STATUS="healthy" || PROD_STATUS="errored"
+else
+  # No platform API available. Fall back to CI history (deploy workflow runs).
+  # DO NOT fall back to `| grep error | wc -l` on logs - that is a rollback-DoS vector.
+  FAILED_RUNS=$(gh run list --branch "$PROD_BRANCH" --limit 3 --json conclusion \
+    --jq '[.[] | select(.conclusion != "success" and .conclusion != null)] | length' 2>/dev/null || echo "0")
+  if [ "$FAILED_RUNS" = "0" ]; then
+    PROD_STATUS="healthy"
+  else
+    PROD_STATUS="errored"
+  fi
 fi
 
-if [ "$ERROR_COUNT" -gt 20 ]; then
-  echo "[ERROR] CRITICAL: High error rate in production: $ERROR_COUNT errors"
+if [ "$PROD_STATUS" != "healthy" ] || { [ -n "$HTTP_STATUS" ] && [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "301" ] && [ "$HTTP_STATUS" != "302" ]; }; then
+  echo "[ERROR] CRITICAL: Production status from platform API: $PROD_STATUS (HTTP $HTTP_STATUS)"
   rollback_production
 else
-  echo "[OK] Production error rate acceptable: $ERROR_COUNT errors"
+  echo "[OK] Production status from platform API: $PROD_STATUS (HTTP $HTTP_STATUS)"
 fi
 ```
 
