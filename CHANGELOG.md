@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-04-26
+
+### Security
+
+- Deployment health check uses platform APIs (Railway, Vercel, Netlify status fields) instead of grep-ing log output for "error"/"exception"/"fatal" word density. Previously attacker-controlled log lines could inflate the error count past the >20 threshold and trigger rollback-to-previous (production DoS).
+
 ## [1.1.1] - 2026-03-16
 
 ### Added
