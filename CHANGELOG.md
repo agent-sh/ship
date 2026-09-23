@@ -6,7 +6,7 @@
 
 ### Changed
 
-- Rewrote every command, agent and skill prompt for current models: goal, constraints with reasons, definition of done, and output contract instead of step-by-step choreography, all-caps rules, and pseudocode. Total prompt size went from 9,166 to about 4,600 words.
+- Rewrote every command, agent and skill prompt for current models: goal, constraints with reasons, definition of done, and output contract instead of step-by-step choreography, all-caps rules, and pseudocode. Total prompt size went from 9,166 to 4,904 words.
 - CI waits use `gh pr checks --watch` and bounded background waits instead of fixed `sleep` calls and polling loops. The mandatory 3-minute sleep is gone: ship waits for a review bot only when recent PRs show one posting without a check run.
 - Review feedback is triaged instead of treated as all-required: fix what is correct, answer what is wrong or out of scope, and on repos without write access never resolve maintainer threads, reply only where a maintainer asked, and stop before merge.
 - Standalone review (Phase 5) is one pass by default, split across at most 3 parallel reviewers only for large diffs. It no longer spawns a nonexistent `review` subagent type.
