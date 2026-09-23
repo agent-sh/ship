@@ -21,10 +21,11 @@ On a failure, read the failing job's log (`gh run view <run-id> --log-failed`), 
 
 ## Waiting for review bots
 
-Many AI reviewers (a Claude or Codex review workflow, CodeRabbit, Gemini, Copilot) run as checks, so `--watch` already covers them. Some post as a GitHub App with no check run. If recent merged PRs in this repo show such a bot reviewing, wait for its first review on this PR before calling the PR clean. Use one bounded background wait, not a fixed sleep:
+Many AI reviewers (a Claude or Codex review workflow, CodeRabbit, Gemini, Copilot) run as checks, so `--watch` already covers them. Some post as a GitHub App with no check run. If recent merged PRs in this repo show such a bot reviewing, wait for that bot's review of the current head before calling the PR clean. Filter by its login and the head commit: any other review (a human, another bot, your own thread replies, the bot's review of an older push) does not count. Use one bounded background wait, not a fixed sleep:
 
 ```bash
-timeout 900 bash -c 'until [ "$(gh pr view '"$PR"' --json reviews -q ".reviews | length")" -gt 0 ]; do sleep 30; done'
+HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+timeout 900 bash -c 'until [ "$(gh pr view "$0" --json reviews -q "[.reviews[] | select(.author.login == \"$1\" and .commit.oid == \"$2\")] | length")" -gt 0 ]; do sleep 30; done' "$PR" "$BOT_LOGIN" "$HEAD_SHA"
 ```
 
 If it times out, proceed and mention it in the report. No sign of review bots on recent PRs means no wait.

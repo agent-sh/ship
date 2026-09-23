@@ -114,6 +114,8 @@ Multi-branch repos only. Deploy to development, validate, promote to production,
 
 ## Phase 11: Cleanup
 
+Only after a merge (`gh pr view <n> --json state` is `MERGED`). If the PR is still open (no write access, or the run stopped early), keep the worktree, the branch, and the task entry, and leave the issue open.
+
 - Under `--state-file`: if the flow state's `git.worktreePath` is the worktree `/next-task` created for this task, remove it from the main repo after the merge, then delete its local branch. Use `git -C <git.mainRepoPath> worktree remove <path>` without `--force`. If it has uncommitted changes, leave it and report it. Release the task entry with `releaseTask(<task.id>, <mainRepoPath>)` from `lib/state/workflow-state.js`.
 - Standalone, outside a worktree: switch to the target branch and delete the merged local branch.
 - Standalone, inside a worktree you did not create in this run: leave it.

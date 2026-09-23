@@ -38,11 +38,13 @@ Promotion needs a branch checkout, so it does not run from a worktree. If `.git`
 PREV_PROD_SHA=$(git rev-parse "origin/$PROD_BRANCH")
 git checkout "$PROD_BRANCH" && git pull --ff-only origin "$PROD_BRANCH"
 git merge --no-ff --no-edit "$TARGET" || { git merge --abort; echo "[ERROR] conflict promoting to $PROD_BRANCH"; exit 1; }
-git push origin "$PROD_BRANCH"
+git push origin "$PROD_BRANCH" || { echo "[ERROR] push to $PROD_BRANCH rejected"; exit 1; }
 PROD_MERGE_SHA=$(git rev-parse HEAD)
 ```
 
-`--no-ff` guarantees a single merge commit, which is what rollback reverts.
+`--no-ff` guarantees a single merge commit, which is what rollback reverts. A rejected push stops the run: production still runs the old deploy, and validating it would report a false success.
+
+Before the merge above: if an earlier run rolled production back (a `Revert "Merge ..."` commit on the production branch for changes that are still on the target), revert that revert with `git revert --no-edit <revert-sha>`. Git treats the reverted commits as already merged, so a plain promotion would ship the new fix without the feature it fixes.
 
 ## Phase 10: Validate production
 
@@ -58,7 +60,7 @@ git revert -m 1 --no-edit "$PROD_MERGE_SHA"
 git push origin "$PROD_BRANCH"
 ```
 
-A revert is a normal push: nobody else's commits on the production branch are rewritten, and the history shows what happened. Wait for the redeploy, re-run the health check, and report `PREV_PROD_SHA`, the revert SHA, and the failing checks. If the push is rejected because someone else pushed in the meantime, stop and hand it to the user.
+A revert is a normal push: nobody else's commits on the production branch are rewritten, and the history shows what happened. Wait for the redeploy, re-run the health check, and report `PREV_PROD_SHA`, the revert SHA, and the failing checks. Record the revert SHA with `updateFlow({ rollback: { revertSha } })` when running under `--state-file`: the next promotion has to revert it first (see Phase 9). If the push is rejected because someone else pushed in the meantime, stop and hand it to the user.
 
 ## Platform detection output
 

@@ -14,10 +14,10 @@ Reference for `/ship`. When a phase fails, stop that phase, tell the user what f
 | Push rejected | The rejection reason | Auth: `gh auth status`. Protected branch: push a feature branch instead. Behind remote: `git pull --rebase origin <branch>`, never a force push over someone else's commits |
 | PR creation failed | The `gh` error | Existing PR: `gh pr list --head <branch>`. No commits: `git log <target>..HEAD` |
 | CI failure you could not fix | Check name, failing log excerpt, what you tried | The user fixes and pushes, then re-runs `/ship` |
-| Merge conflict with the target | Conflicting files | `git fetch origin && git rebase origin/<target>` (or merge, per repo convention), resolve, push, re-run |
+| Merge conflict with the target | Conflicting files | `git fetch origin && git merge origin/<target>`, resolve, push, re-run. Rebase instead only if the branch is yours alone, then `git push --force-with-lease` |
 | Review loop did not converge in 5 rounds | Open threads with links | The user decides: fix, answer, or ask the reviewer to close them |
 | Deploy failed | Platform, deploy ID, log excerpt | Fix and re-run; production was not touched if the failure was in development |
-| Production validation failed | Failing checks, `PREV_PROD_SHA`, revert SHA | Rollback already ran (see `ship-deployment.md`). Fix forward, then ship again |
+| Production validation failed | Failing checks, `PREV_PROD_SHA`, revert SHA | Rollback already ran (see `ship-deployment.md`). Fix forward, then ship again: the next promotion reverts the revert commit first, or the rolled-back changes stay out of production |
 | Worktree could not be removed | The path and why (usually uncommitted changes) | Left in place on purpose. The user inspects it, then `git worktree remove <path>` |
 
 ## Cancel

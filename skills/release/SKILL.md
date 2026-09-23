@@ -17,7 +17,7 @@ Done means: the version is bumped in every manifest, the changelog has a section
 - Start on the default branch, clean tree, up to date (`git pull --ff-only`). A release cut from a stale or dirty tree ships code nobody reviewed.
 - Tests run after the bump and before the commit. On failure, `git checkout -- .` to revert the bump and stop.
 - Never force-push and never move a tag.
-- If the push to the default branch is rejected by branch protection, push a `release/<tag>` branch and open a PR instead. Tag after it merges.
+- Push the release commit before creating the tag. If branch protection rejects the push, push a `release/<tag>` branch and open a PR instead, and create the tag on the merged commit after it lands. A tag made before the push would point at a commit that never reaches the default branch.
 - With `--dry-run`, print the plan below and change nothing.
 
 ## Version
@@ -43,8 +43,8 @@ Take commits since the last tag (`git log <last-tag>..HEAD --oneline --no-merges
 <testCommand>                                   # npm test, cargo test, pytest, go test ./..., mvn test, gradle test
 git add <manifests> <lockfiles> <changelog>
 git commit -m "release: <tag>"
+git push origin <default-branch>          # rejected: open a release PR instead, see Constraints
 git tag -a "<tag>" -m "Release <tag>"
-git push origin <default-branch>
 git push origin "<tag>"
 gh release create "<tag>" --title "<tag>" --generate-notes --latest
 ```
