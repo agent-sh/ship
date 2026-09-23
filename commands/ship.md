@@ -115,7 +115,9 @@ Multi-branch repos only. Deploy to development, validate, promote to production,
 ## Phase 11: Cleanup
 
 - Under `--state-file`: if the flow state's `git.worktreePath` is the worktree `/next-task` created for this task, remove it from the main repo after the merge, then delete its local branch. Use `git -C <git.mainRepoPath> worktree remove <path>` without `--force`. If it has uncommitted changes, leave it and report it. Release the task entry with `releaseTask(<task.id>, <mainRepoPath>)` from `lib/state/workflow-state.js`.
-- Standalone, outside a worktree: switch to the target branch and delete the merged local branch with `git branch -d`.
+- Standalone, outside a worktree: switch to the target branch and delete the merged local branch.
+
+Delete a merged branch with `git branch -D`: after a squash or rebase merge git does not see it as merged, and the PR state already confirms the merge. Only delete branches this run shipped.
 - Standalone, inside a worktree you did not create in this run: leave it.
 - GitHub task from `/next-task`: comment on the issue with the PR number and merge commit, then `gh issue close <id> --reason completed`.
 
