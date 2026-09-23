@@ -1,208 +1,62 @@
 ---
 name: release
 description: "Generic release workflow for repositories without a dedicated release tool. Handles version bump, changelog, test, tag, push, GitHub release, and optional publish."
-version: 0.2.0
+version: 0.3.0
 argument-hint: "[patch|minor|major] [--dry-run] [--skip-publish] [--skip-changelog] [--profile=JSON]"
 disable-model-invocation: true
 ---
 
 # release
 
-Generic release workflow used as a fallback when no dedicated release tool (semantic-release, release-it, goreleaser, etc.) is configured. Called by the release-agent after discovery.
+The manual release path, used by `ship:release-agent` when discovery found a package manifest but no release tool or script. Input (`$ARGUMENTS`) is the bump level, flags, and the discovery profile (`--profile=JSON`: ecosystem, manifests, `currentVersion`, `tagPrefix`, `changelogFile`, `testCommand`, `publishCommand`, `ciRelease`).
 
-## Arguments
+Done means: the version is bumped in every manifest, the changelog has a section for it (unless `--skip-changelog`), tests passed, the release commit and an annotated tag are pushed, a GitHub release exists, and the package is published unless `--skip-publish`, the ecosystem is tag-only, or a CI workflow publishes on tag push.
 
-Parse from `$ARGUMENTS`:
+## Constraints
 
-| Argument | Values | Default | Description |
-|---|---|---|---|
-| bump | patch, minor, major | patch | Semver bump level |
-| `--dry-run` | flag | - | Show plan without executing |
-| `--skip-publish` | flag | - | Tag and release but don't publish |
-| `--skip-changelog` | flag | - | Skip changelog update |
-| `--profile=JSON` | string | - | Discovery profile from release-agent |
+- Start on the default branch, clean tree, up to date (`git pull --ff-only`). A release cut from a stale or dirty tree ships code nobody reviewed.
+- Tests run after the bump and before the commit. On failure, `git checkout -- .` to revert the bump and stop.
+- Never force-push and never move a tag.
+- If the push to the default branch is rejected by branch protection, push a `release/<tag>` branch and open a PR instead. Tag after it merges.
+- With `--dry-run`, print the plan below and change nothing.
 
-## Workflow
+## Version
 
-### Phase 1: Validate Prerequisites
+New version is plain semver arithmetic on `currentVersion` (`patch` 1.2.3 -> 1.2.4, `minor` -> 1.3.0, `major` -> 2.0.0). Tag is `<tagPrefix><newVersion>`, prefix `v` by default.
 
-```bash
-# Must be on main/master branch
-CURRENT_BRANCH=$(git branch --show-current)
-MAIN_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
-if [ "$CURRENT_BRANCH" != "$MAIN_BRANCH" ]; then
-  echo "[ERROR] Must be on $MAIN_BRANCH to release (currently on $CURRENT_BRANCH)"
-  exit 1
-fi
+| Ecosystem | Read | Bump |
+|---|---|---|
+| npm | `node -p "require('./package.json').version"` | `npm version <new> --no-git-tag-version` |
+| cargo | `version =` in `Cargo.toml` (workspace root for workspaces) | Edit the field in each crate on the old version, then `cargo check` to refresh `Cargo.lock` |
+| python | `[project]` or `[tool.poetry]` `version` in `pyproject.toml` | Edit the field |
+| maven | `mvn help:evaluate -Dexpression=project.version -q -DforceStdout` | `mvn versions:set -DnewVersion=<new> -DgenerateBackupPoms=false` |
+| go, swift | latest tag | tag only |
+| other | the manifest's version field | edit it |
 
-# Must be clean working tree
-if [ -n "$(git status --porcelain)" ]; then
-  echo "[ERROR] Working tree is dirty. Commit or stash changes first."
-  exit 1
-fi
+## Changelog
 
-# Pull latest
-git pull origin "$MAIN_BRANCH"
-```
+Take commits since the last tag (`git log <last-tag>..HEAD --oneline --no-merges`) and add a `## <tag> - <YYYY-MM-DD>` section at the top of the changelog, following the file's existing format (Keep a Changelog headings, or whatever it already uses). Group by conventional-commit type when the history uses it: `feat` under Added, `fix` under Fixed, `refactor`/`perf` under Changed, `docs` under Documentation. Write entries for users, not commit subjects copied verbatim.
 
-### Phase 2: Read Version
-
-Use the profile to determine where the version lives.
-
-**npm** (package.json):
-```bash
-CURRENT_VERSION=$(node -e "console.log(require('./package.json').version)")
-```
-
-**cargo** (Cargo.toml):
-```bash
-CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-```
-
-**python** (pyproject.toml):
-```bash
-CURRENT_VERSION=$(grep -m1 'version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
-```
-
-**go** (tags only):
-```bash
-CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
-```
-
-**maven** (pom.xml):
-```bash
-CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed 's/-SNAPSHOT//')
-```
-
-### Phase 3: Calculate New Version
-
-```javascript
-const [major, minor, patch] = currentVersion.split('.').map(Number);
-const newVersion = bump === 'major' ? `${major + 1}.0.0`
-  : bump === 'minor' ? `${major}.${minor + 1}.0`
-  : `${major}.${minor}.${patch + 1}`;
-```
-
-Use the tag prefix from the profile (default `v`).
-
-### Phase 4: Dry Run Check
-
-If `--dry-run`, display the plan and stop:
-
-```
-Release Plan
-  Ecosystem: {ecosystem}
-  Current version: {currentVersion}
-  New version: {newVersion} ({bump} bump)
-  Tag: {tagPrefix}{newVersion}
-  Commits since last tag: {count}
-  Changelog: {will update | skip}
-  Publish: {command | skip}
-  [DRY RUN] No changes made
-```
-
-### Phase 5: Bump Version
-
-**npm**:
-```bash
-npm version $NEW_VERSION --no-git-tag-version
-```
-
-**cargo** (single crate):
-
-Use the Edit tool to replace `version = "{CURRENT}"` with `version = "{NEW}"` in Cargo.toml, then run `cargo check` to update Cargo.lock.
-
-**cargo workspace**: Bump workspace version in root Cargo.toml. Individual crates matching the old version should also be bumped.
-
-**python** (pyproject.toml):
-
-Use the Edit tool to replace `version = "{CURRENT}"` with `version = "{NEW}"` in pyproject.toml.
-
-**go**: No manifest to bump (version is tag-only).
-
-**maven**:
-```bash
-mvn versions:set -DnewVersion=$NEW_VERSION -DgenerateBackupPoms=false
-```
-
-**Other**: Use sed or the appropriate ecosystem tool to update the version field.
-
-### Phase 6: Update Changelog
-
-Skip if `--skip-changelog`.
-
-1. Generate commit log since last tag:
-   ```bash
-   LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-   if [ -n "$LAST_TAG" ]; then
-     COMMITS=$(git log $LAST_TAG..HEAD --oneline --no-merges)
-   else
-     COMMITS=$(git log --oneline --no-merges -20)
-   fi
-   ```
-
-2. If a changelog file exists (from profile), prepend a new version section:
-   ```markdown
-   ## {tagPrefix}{newVersion} - {YYYY-MM-DD}
-
-   {Categorized commit summaries}
-   ```
-
-3. Categorize by conventional commit prefix:
-   - `feat:` -> Added
-   - `fix:` -> Fixed
-   - `refactor:` / `perf:` -> Changed
-   - `docs:` -> Documentation
-   - Other -> Other
-
-### Phase 7: Run Tests
-
-Detect or use the test command from the profile:
-
-| Ecosystem | Test Command |
-|---|---|
-| npm | `npm test` |
-| cargo | `cargo test` |
-| python | `pytest` or `python -m pytest` |
-| go | `go test ./...` |
-| maven | `mvn test` |
-| gradle | `gradle test` |
-
-If tests fail: revert version bump and abort.
+## Test, commit, tag, push
 
 ```bash
-# Revert on failure
-git checkout -- .
-echo "[ERROR] Tests failed - aborting release. Version bump reverted."
+<testCommand>                                   # npm test, cargo test, pytest, go test ./..., mvn test, gradle test
+git add <manifests> <lockfiles> <changelog>
+git commit -m "release: <tag>"
+git tag -a "<tag>" -m "Release <tag>"
+git push origin <default-branch>
+git push origin "<tag>"
+gh release create "<tag>" --title "<tag>" --generate-notes --latest
 ```
 
-### Phase 8: Commit, Tag, Push
+## Publish
 
-```bash
-git add -A
-git commit -m "release: {tagPrefix}{newVersion}"
-git tag -a "{tagPrefix}{newVersion}" -m "Release {tagPrefix}{newVersion}"
-git push origin $MAIN_BRANCH
-git push origin "{tagPrefix}{newVersion}"
-```
+Skip for tag-only ecosystems, `--skip-publish`, or when `ciRelease` publishes on the tag push.
 
-### Phase 9: Create GitHub Release
-
-```bash
-gh release create "{tagPrefix}{newVersion}" \
-  --title "{tagPrefix}{newVersion}" \
-  --generate-notes \
-  --latest
-```
-
-### Phase 10: Publish
-
-Skip if `--skip-publish` or if ecosystem is tag-only (go, packagist, swift).
-
-| Ecosystem | Publish Command |
+| Ecosystem | Command |
 |---|---|
 | npm | `npm publish --access public` |
-| cargo | `cargo publish` |
+| cargo | `cargo publish` (workspace: in dependency order) |
 | python | `python -m build && twine upload dist/*` |
 | maven | `mvn deploy` |
 | gradle | `gradle publish` |
@@ -211,26 +65,26 @@ Skip if `--skip-publish` or if ecosystem is tag-only (go, packagist, swift).
 | dart | `dart pub publish` |
 | hex | `mix hex.publish` |
 
-For cargo workspace: publish crates in dependency order.
+A failed publish after a pushed tag is a `[WARN]`, not a rollback: report it so the user can retry the publish alone.
 
-## Output
+## Plan (for `--dry-run`) and report
 
 ```
-[OK] Released {tagPrefix}{newVersion}
-  Version bumped: {currentVersion} -> {newVersion}
-  Changelog: {updated | skipped}
-  Tag: {tagPrefix}{newVersion} pushed
-  GitHub release: https://github.com/{owner}/{repo}/releases/tag/{tagPrefix}{newVersion}
-  Published: {registry | skipped | tag-only}
+Release Plan
+  Ecosystem: <ecosystem>
+  Version: <current> -> <new> (<bump>)
+  Tag: <tag>
+  Commits since last tag: <n>
+  Changelog: <will update|skip>
+  Publish: <command|by CI|skip>
+  [DRY RUN] No changes made
 ```
 
-## Constraints
-
-- MUST be on main/master branch
-- MUST have clean working tree
-- MUST run tests before tagging
-- MUST abort and revert if tests fail
-- MUST use tag prefix from profile (default `v`)
-- MUST generate release notes via `gh release create --generate-notes`
-- NEVER publish without running tests first
-- NEVER force-push tags
+```
+[OK] Released <tag>
+  Version bumped: <current> -> <new>
+  Changelog: <updated|skipped>
+  Tag: <tag> pushed
+  GitHub release: https://github.com/<owner>/<repo>/releases/tag/<tag>
+  Published: <registry|by CI|skipped|tag-only>
+```

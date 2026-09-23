@@ -1,14 +1,14 @@
 # ship
 
-End-to-end PR workflow - commit, push, create PR, monitor CI, address every review comment, merge, deploy, validate - plus discovery-first release automation.
+End-to-end PR workflow: commit, push, create PR, monitor CI, handle review feedback, merge, deploy, validate. Plus discovery-first release automation.
 
 ## Why
 
-Shipping code involves a long tail of manual steps after the code is written: staging, committing, pushing, writing PR descriptions, waiting for CI, reading reviewer comments, pushing fixes, re-waiting, merging, cleaning up branches. ship handles all of it. It also enforces a discipline most developers skip: addressing every single review comment before merge.
+Shipping code has a long tail of manual steps after the code is written: staging, committing, pushing, writing the PR description, waiting for CI, reading reviewer comments, pushing fixes, merging, cleaning up branches. ship handles all of it, and it does not call a PR done while review feedback is still unanswered.
 
 **Use cases:**
-- Ship a feature branch to production with zero manual steps after invocation
-- Let auto-reviewers (Copilot, Gemini, CodeRabbit) run and address all their feedback automatically
+- Ship a feature branch to production with no manual steps after invocation
+- Let auto-reviewers (Copilot, Gemini, CodeRabbit, a Claude or Codex review workflow) run, then fix or answer their feedback
 - Cut a versioned release without knowing how the repo's release tooling works
 - Dry-run a ship or release to see what would happen
 
@@ -39,27 +39,19 @@ Requires [agentsys](https://github.com/agent-sh/agentsys) runtime.
 
 | Phase | Description |
 |-------|-------------|
-| 1 | **Pre-flight** - detect CI platform, deploy platform, branch strategy, verify tools |
-| 2 | **Commit** - stage changes (excluding secrets), generate semantic commit message |
-| 3 | **Create PR** - push branch, open PR with summary and test plan |
-| 4 | **CI & Review Loop** - wait for CI, wait 3 min for auto-reviewers, address all comments, iterate until zero unresolved threads (max 10 iterations) |
-| 5 | **Internal Review** - 4 parallel review passes (standalone only; skipped when called from /next-task) |
-| 6 | **Merge** - verify mergeable status, confirm zero unresolved threads, merge with chosen strategy |
-| 7-10 | **Deploy & Validate** - platform-specific deployment, health checks, auto-rollback on failure |
-| 11 | **Cleanup** - remove worktrees, close linked issues, delete branches |
+| 1 | **Pre-flight** - detect CI platform, deploy platform, branch strategy, write access |
+| 2 | **Commit** - run tests, stage changes by path (never secrets), write a conventional commit |
+| 3 | **Create PR** - push the branch, open or reuse the PR |
+| 4 | **CI & Review Loop** - wait on checks with `gh pr checks --watch`, fix failures, fix or answer every review thread, repeat (max 5 rounds) |
+| 5 | **Internal Review** - one review pass, split across up to 3 parallel reviewers only for large diffs (standalone only; skipped when called from /next-task) |
+| 6 | **Merge** - verify mergeable, zero unresolved threads, green checks, then merge with the chosen strategy |
+| 7-10 | **Deploy & Validate** - platform-specific deploy waits, health checks, revert-based rollback on failure |
+| 11 | **Cleanup** - remove only the worktree and branch this run (or its /next-task run) created, close the linked issue |
 | 12 | **Report** - final status summary |
 
-### The review loop is mandatory
+### The review loop always runs
 
-Phase 4 always runs - even when invoked from `/next-task`. After PR creation, ship waits 3 minutes for auto-reviewers to post, then enters a loop:
-
-1. Check CI status (fix failures via ci-fixer agent if needed)
-2. Fetch all unresolved comment threads
-3. Classify each comment (code fix, style suggestion, question, false positive)
-4. Apply fixes or post replies
-5. Push, wait 30 seconds, repeat
-
-The loop exits only when unresolved threads reach zero.
+Phase 4 runs even when invoked from `/next-task`, because CI and external reviewers only see the code once the PR exists. Each round waits for checks without fixed sleeps, fixes CI failures, then triages every comment: fix what is correct, answer what is wrong or out of scope, answer questions. On your own repo it resolves the threads it handled. On a repo you do not have write access to, it never resolves threads, replies only where a maintainer asked, and stops at "ready for review" instead of merging.
 
 ### Platform detection
 
@@ -81,6 +73,8 @@ The release agent uses a discovery-first approach - it inspects your repo before
 
 **Supported ecosystems:** npm, Cargo, Python (pyproject.toml, setup.py), Go, Maven, Gradle, RubyGems, NuGet, Dart, Composer, Hex, Swift.
 
+The agent first returns a plan, `/release` confirms it with you (skip with `--yes`), then the agent executes it.
+
 **Constraints:** Tests must pass before tagging. Version bump is reverted if tests fail. Tags are never force-pushed.
 
 ## Agents
@@ -91,7 +85,7 @@ The release agent uses a discovery-first approach - it inspects your repo before
 
 ## Integration with /next-task
 
-When called from the next-task workflow (via `--state-file`), ship skips its internal review (Phase 5) and deslop/docs steps since next-task already ran those. Phase 4 (CI & review loop) still runs because external auto-reviewers comment after PR creation.
+When called from the next-task workflow (via `--state-file`), ship skips its internal review (Phase 5) since next-task already ran one. Phase 4 (CI & review loop) still runs because external reviewers comment after PR creation. After the merge, ship removes the worktree next-task created for the task and releases the task from the registry.
 
 ## Requirements
 
@@ -103,8 +97,8 @@ When called from the next-task workflow (via `--state-file`), ship skips its int
 ## Related Plugins
 
 - [next-task](https://github.com/agent-sh/next-task) - full task-to-production orchestrator (calls ship as Phase 12)
-- [deslop](https://github.com/agent-sh/deslop) - AI slop cleanup (used in standalone review)
-- [sync-docs](https://github.com/agent-sh/sync-docs) - documentation sync (used in standalone mode)
+- [deslop](https://github.com/agent-sh/deslop) - AI slop cleanup, useful before shipping
+- [sync-docs](https://github.com/agent-sh/sync-docs) - documentation sync, useful before shipping
 
 ## License
 

@@ -5,550 +5,134 @@ argument-hint: "[--strategy STRATEGY] [--skip-tests] [--dry-run] [--state-file P
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(npm:*), Bash(node:*), Read, Write, Edit, Glob, Grep, Task
 ---
 
-# /ship - Complete PR Workflow
+# /ship
 
-End-to-end workflow: commit - PR - CI - review - merge - deploy - validate - production.
-
-Auto-adapts to your project's CI platform, deployment platform, and branch strategy.
-
----
-
-<mandatory-steps>
-## Mandatory Steps - No Shortcuts
-
-Phase 4 (CI & Review Monitor Loop) is mandatory even when called from /next-task.
-
-| Step | Requirement | Why It Matters |
-|------|-------------|----------------|
-| 3-minute initial wait | Must wait after PR creation | Auto-reviewers need time to analyze |
-| Monitor loop iterations | Must run the full loop | Catches issues humans miss |
-| Address all comments | Zero unresolved threads | Quality gate, blocks merge otherwise |
-
-### Forbidden Actions
-- Checking CI once and proceeding to merge
-- Skipping the 3-minute initial wait for auto-reviewers
-- Ignoring "minor" or "nit" comments
-- Merging with unresolved comment threads
-- Rationalizing "no comments yet means ready to merge"
-
-### Required Verification Output
-
-Before proceeding to merge, output:
-```
-[VERIFIED] Phase 4: wait=180s, iterations=N, unresolved=0
-```
-</mandatory-steps>
-
----
-
-## Quick Reference
-
-| Phase | Description | Details |
-|-------|-------------|---------|
-| 1-3 | Pre-flight, Commit, Create PR | This file |
-| 4 | CI & Review Monitor Loop | See `ship-ci-review-loop.md` |
-| 5 | Subagent Review (standalone) | This file |
-| 6 | Merge PR | This file |
-| 7-10 | Deploy & Validate | See `ship-deployment.md` |
-| 11-12 | Cleanup & Report | This file |
-| Errors | Error handling & rollback | See `ship-error-handling.md` |
-
-## Integration with /next-task
-
-When called from `/next-task` workflow (via `--state-file`):
-- **SKIPS Phase 5** internal review agents (already done by Phase 9 review loop)
-- **SKIPS deslop/docs** (already done by deslop:deslop-agent, sync-docs:sync-docs-agent)
-- **Trusts** that all quality gates passed
-- **Reads `git.baseBranch`** from flow state to determine PR target branch
-
-**CRITICAL: Phase 4 ALWAYS runs** - even from /next-task. External auto-reviewers (Gemini, Copilot, CodeRabbit) comment AFTER PR creation and must be addressed.
-
-When called standalone, runs full workflow including review.
+Take the current feature branch to a merged PR, and on multi-branch repos through a validated production deploy. The run is done when the PR is merged (or, on a repo you cannot merge to, ready for the maintainers), CI is green on the merged head, review feedback is handled, and anything this run created locally is cleaned up.
 
 ## Arguments
 
-Parse from $ARGUMENTS:
-- **--strategy**: Merge strategy: `squash` (default) | `merge` | `rebase`
-- **--skip-tests**: Skip test validation (dangerous)
-- **--dry-run**: Show what would happen without executing
-- **--state-file**: Path to workflow state file (for /next-task integration)
-- **--base**: Override target branch for PR (default: repo default branch). When `--state-file` is provided, reads `git.baseBranch` from flow state if `--base` is not explicitly set.
+Parse from `$ARGUMENTS`:
 
-## State Integration
+- `--strategy squash|merge|rebase`: merge strategy. Default `squash`.
+- `--skip-tests`: skip the local test run before pushing. CI still has to pass.
+- `--dry-run`: print the plan and stop. Change nothing.
+- `--state-file PATH`: the `/next-task` flow state. Present means `/next-task` already ran review, deslop and docs.
+- `--base BRANCH`: PR target. Default: `git.baseBranch` from the flow state if `--state-file` is set, else the repo default branch.
 
-```javascript
-const { getPluginRoot } = require('./lib/cross-platform');
-const pluginRoot = getPluginRoot('ship');
-if (!pluginRoot) { console.error('Error: Could not locate ship plugin root'); process.exit(1); }
+## Constraints
 
-const args = '$ARGUMENTS'.split(' ');
-const stateIdx = args.indexOf('--state-file');
-const baseIdx = args.indexOf('--base');
-let workflowState = null;
-let baseBranchOverride = baseIdx >= 0 ? args[baseIdx + 1] : null;
+- Never force-push a branch other people build on (the base branch, a production branch). Production rollback uses `git revert`, not a reset.
+- Stage files by name, never `.env`, keys, or credentials. A leaked secret in a public PR is not recoverable by a later commit.
+- Clean up only what this run or the `/next-task` run that called it created: its own worktree, its own local branch, its own task registry entry. Other worktrees and branches may be another agent's live work.
+- On a repo where you lack write access (a fork PR to an upstream project), do not merge, do not resolve maintainers' threads, and reply only where a maintainer asked something. Stop at "ready for review" and report. Maintainers read a queue, and extra comments cost them.
+- Do not post to an issue tracker unless the run came from `/next-task` with a GitHub task source. The plan approval in `/next-task` is the user's consent for those comments.
 
-// Always try to read flow state (even without --state-file, check the state dir)
-if (stateIdx >= 0) {
-  workflowState = require(`${pluginRoot}/lib/state/workflow-state.js`);
-}
+## Harness defaults
 
-// Resolve baseBranch from all available sources
-if (!baseBranchOverride) {
-  // Check flow state for baseBranch (set by /next-task --base)
-  const flow = workflowState?.readFlow?.() || workflowState?.readState?.();
-  if (flow?.git?.baseBranch) baseBranchOverride = flow.git.baseBranch;
-}
+- No `Task` tool: do any review or fix work inline instead of delegating.
+- No `AskUserQuestion`: ask in plain text and wait for the reply.
+- An optional agent is not installed (for example `next-task:ci-fixer`): do the work inline. Nothing in this workflow requires another plugin.
 
-function updatePhase(phase, result) {
-  if (!workflowState) return;
-  workflowState.startPhase(phase);
-  if (result) workflowState.completePhase(result);
-}
-```
+## Phase 1: Pre-flight
 
-## Phase 1: Pre-flight Checks
+Detect the environment with the plugin's scripts:
 
 ```bash
-# Detect platform and project configuration
-PLUGIN_PATH=$(node -e "const root = process.env.CLAUDE_PLUGIN_ROOT; if (!root) { const { getPluginRoot } = require(require('path').join(process.env.HOME || process.env.USERPROFILE, '.claude/plugins/marketplaces/agentsys/lib/cross-platform')); const r = getPluginRoot('ship'); if (!r) { console.error('Error: Could not locate ship plugin root'); process.exit(1); } console.log(r); } else { console.log(root); }")
-PLATFORM=$(node "$PLUGIN_PATH/lib/platform/detect-platform.js")
-TOOLS=$(node "$PLUGIN_PATH/lib/platform/verify-tools.js")
-
-# Extract critical info
-CI_PLATFORM=$(echo $PLATFORM | jq -r '.ci')
-DEPLOYMENT=$(echo $PLATFORM | jq -r '.deployment')
-BRANCH_STRATEGY=$(echo $PLATFORM | jq -r '.branchStrategy')
-MAIN_BRANCH=$(echo $PLATFORM | jq -r '.mainBranch')
-
-# Resolve target branch: explicit --base > flow state > platform default
-DEFAULT_BRANCH="$MAIN_BRANCH"
-if [ -n "$baseBranchOverride" ] && [ "$baseBranchOverride" != "$MAIN_BRANCH" ]; then
-  MAIN_BRANCH="$baseBranchOverride"
-fi
+PLATFORM=$(node "${CLAUDE_PLUGIN_ROOT}/lib/platform/detect-platform.js")   # ci, deployment, branchStrategy, mainBranch, packageManager
+TOOLS=$(node "${CLAUDE_PLUGIN_ROOT}/lib/platform/verify-tools.js")         # .gh.available etc.
 ```
 
-**Target branch validation**: If `MAIN_BRANCH` differs from `DEFAULT_BRANCH` (repo default), confirm with the user before proceeding:
+Stop with install and `gh auth login` instructions if `gh` is missing. Stop if the current branch is the target branch: shipping needs a feature branch.
 
-```
-[WARN] PR target is {MAIN_BRANCH}, not the repo default ({DEFAULT_BRANCH}).
-       Source: {--base flag | workflow state}
-       Continue shipping to {MAIN_BRANCH}? (y/n)
-```
+Resolve the target branch: `--base`, then the flow state's `git.baseBranch`, then `mainBranch`. If it differs from the repo default and the run is interactive (no `--state-file`), confirm it with the user. Under `--state-file`, trust the flow state.
 
-If the user declines, fall back to `DEFAULT_BRANCH`. If running from `/next-task` with `--state-file` (automated), trust the flow state without prompting.
+`branchStrategy: multi-branch` means a dev and a production branch (`stable` by default). Phases 7 to 10 only run in that case.
+
+Check write access once, it decides the external-repo rules above:
 
 ```bash
-# Check required tools
-GH_AVAILABLE=$(echo $TOOLS | jq -r '.gh.available')
-if [ "$GH_AVAILABLE" != "true" ]; then
-  echo "ERROR: GitHub CLI (gh) required for PR workflow"
-  exit 1
-fi
+gh repo view <base-repo> --json viewerPermission -q .viewerPermission   # ADMIN, MAINTAIN or WRITE means you can merge
+```
 
-# Determine workflow type
-if [ "$BRANCH_STRATEGY" = "multi-branch" ]; then
-  WORKFLOW="dev-prod"
-  PROD_BRANCH="stable"
+`<base-repo>` is the repo the PR targets: the upstream parent when you work from a fork.
+
+With `--dry-run`, print this and stop:
+
+```
+## Dry Run
+Branch: <current> -> <target>
+Workflow: single-branch|dev-prod | CI: <ci> | Deploy: <deployment>
+Will: commit <n> files | push | open PR | monitor CI and reviews | merge (<strategy>) | deploy
+```
+
+## Phase 2: Commit
+
+Only if `git status --porcelain` shows changes. Unless `--skip-tests`, run the project's test command first and stop on failure. Stage the relevant files by path and write a conventional commit message that matches the repo's history (`git log --oneline -10`).
+
+## Phase 3: Push and open the PR
+
+Push with `git push -u origin <branch>`. Reuse an open PR for the branch if one exists (`gh pr list --head <branch>`). Otherwise open one with `gh pr create --base <target>`, using the repo's PR template if it has one. The body says what changed, why, and how it was tested, and links the issue (`Closes #N`) when there is one.
+
+## Phase 4: CI and review loop
+
+Required on every run, including runs from `/next-task`: CI and external reviewers only see the code once the PR exists. The mechanics (waiting without sleeps, fetching threads, replying, resolving) are in `ship-ci-review-loop.md`.
+
+Exit condition: all required checks pass, and every review thread is either fixed or answered. On a repo you own, that means zero unresolved threads and no outstanding "changes requested". After 5 rounds without converging, stop and report what is left.
+
+## Phase 5: Standalone review
+
+Skip under `--state-file` when the flow state shows the `/next-task` review loop approved.
+
+Otherwise review the diff (`git diff <target>...HEAD`) once for correctness, security, performance and test coverage. Default is a single pass, inline or in one `general-purpose` subagent. For a large diff (roughly 500+ changed lines or 15+ files), you may split the concerns across up to 3 parallel subagents if `Task` is available. Fix critical and high findings. Fix medium ones when the fix is small and clearly correct. Low findings are optional. Re-review only the changed hunks, at most 2 more rounds. If fixes were pushed, Phase 4 runs again.
+
+## Phase 6: Merge
+
+Only with write access. Check:
+
+- `gh pr view <n> --json mergeable,mergeStateStatus` reports `MERGEABLE`.
+- No unresolved review threads (query in `ship-ci-review-loop.md`).
+- Checks are green on the current head.
+
+Then merge. Inside a worktree, `gh pr merge --delete-branch` tries to check out the base branch locally and fails, so split it:
+
+```bash
+if [ -f "$(git rev-parse --show-toplevel)/.git" ]; then   # .git is a file inside a worktree
+  gh pr merge "$PR" --"$STRATEGY"
+  git push origin --delete "$BRANCH" || echo "[WARN] remote branch not deleted"
 else
-  WORKFLOW="single-branch"
+  gh pr merge "$PR" --"$STRATEGY" --delete-branch
+  git checkout "$TARGET" && git pull --ff-only origin "$TARGET"
 fi
+MERGE_SHA=$(gh pr view "$PR" --json mergeCommit -q .mergeCommit.oid)
 ```
 
-### Verify Git Status
+If the repo has a cached `repo-intel.json`, refresh it through the agentsys runtime (`repoMap.update`). Skip silently if the runtime or the map is missing.
 
-```bash
-# Check for uncommitted changes
-if [ -n "$(git status --porcelain)" ]; then
-  NEEDS_COMMIT="true"
-else
-  NEEDS_COMMIT="false"
-fi
+## Phases 7 to 10: Deploy and validate
 
-# Must be on feature branch
-CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" = "$MAIN_BRANCH" ]; then
-  echo "ERROR: Cannot ship from $MAIN_BRANCH, must be on feature branch"
-  exit 1
-fi
-```
-
-### Dry Run Mode
-
-If `--dry-run` provided, show plan and exit:
-```markdown
-## Dry Run: What Would Happen
-**Branch**: ${CURRENT_BRANCH} → **Target**: ${MAIN_BRANCH}
-**Workflow**: ${WORKFLOW} | **CI**: ${CI_PLATFORM} | **Deploy**: ${DEPLOYMENT}
-```
-
-## Phase 2: Commit Current Work
-
-Only if `NEEDS_COMMIT=true`:
-
-```bash
-# Stage relevant files (exclude secrets)
-git status --porcelain | awk '{print $2}' | grep -v '\.env' | xargs git add
-
-# Generate semantic commit message
-# Format: <type>(<scope>): <subject>
-# Types: feat, fix, docs, refactor, test, chore
-
-git commit -m "$(cat <<'EOF'
-${COMMIT_MESSAGE}
-EOF
-)"
-
-COMMIT_SHA=$(git rev-parse HEAD)
-echo "[OK] Committed: $COMMIT_SHA"
-```
-
-## Phase 3: Create Pull Request
-
-```bash
-# Push to remote
-git push -u origin $CURRENT_BRANCH
-
-# Create PR
-PR_URL=$(gh pr create \
-  --base "$MAIN_BRANCH" \
-  --title "$PR_TITLE" \
-  --body "$(cat <<'EOF'
-## Summary
-- Bullet points of changes
-
-## Test Plan
-- How to test
-
-## Related Issues
-Closes #X
-EOF
-)")
-
-PR_NUMBER=$(echo $PR_URL | grep -oP '/pull/\K\d+')
-echo "[OK] Created PR #$PR_NUMBER: $PR_URL"
-```
-
-<phase-4>
-## Phase 4: CI & Review Monitor Loop
-
-**Blocking gate** - This phase is mandatory. Cannot proceed to merge without completing.
-
-See `ship-ci-review-loop.md` for full implementation details.
-
-### Summary
-
-The monitor loop must:
-1. Wait for CI to pass
-2. Wait 3 minutes for auto-reviewers (mandatory on first iteration)
-3. Address all comments (zero unresolved threads)
-4. Iterate until clean
-
-**Every comment must be addressed:**
-- Critical/High issues: Fix immediately
-- Medium/Minor issues: Fix (shows quality)
-- Questions: Answer with explanation
-- False positives: Reply explaining why, then resolve
-
-Do not ignore comments. Do not leave comments unresolved.
-Do not skip the 3-minute wait. Do not check CI once and merge.
-
-### Loop Structure
-
-```bash
-MAX_ITERATIONS=10
-INITIAL_WAIT=180  # 3 minutes - do not reduce or skip
-
-iteration=0
-while [ $iteration -lt $MAX_ITERATIONS ]; do
-  iteration=$((iteration + 1))
-  echo "[CI Monitor] Iteration $iteration"
-
-  # 1. Wait for CI to complete
-  wait_for_ci || { fix_ci_failures; continue; }
-
-  # 2. First iteration must wait for auto-reviews
-  if [ $iteration -eq 1 ]; then
-    echo "Waiting ${INITIAL_WAIT}s for auto-reviewers..."
-    sleep $INITIAL_WAIT
-    echo "[DONE] Initial wait complete"
-  fi
-
-  # 3. Check feedback
-  FEEDBACK=$(check_pr_feedback $PR_NUMBER)
-  UNRESOLVED=$(echo "$FEEDBACK" | jq -r '.unresolvedThreads')
-
-  echo "Unresolved threads: $UNRESOLVED"
-
-  # 4. Exit only if zero unresolved
-  if [ "$UNRESOLVED" -eq 0 ]; then
-    echo "[OK] All comments resolved - ready to merge"
-    break
-  fi
-
-  # 5. Address all feedback (see ship-ci-review-loop.md)
-  address_all_feedback $PR_NUMBER
-
-  # 6. Commit and push fixes
-  commit_and_push_fixes "fix: address review feedback (iteration $iteration)"
-
-  # 7. Wait before next iteration
-  sleep 30
-done
-
-# Verification output - mandatory
-echo "[VERIFIED] Phase 4: wait=180s, iterations=$iteration, unresolved=0"
-```
-
-### Forbidden Actions in Phase 4
-- `sleep 0` or removing the initial wait
-- Checking CI once without running the loop
-- Breaking out of loop with unresolved comments
-- Skipping to Phase 6 (merge) without verification output
-</phase-4>
-
-## Phase 5: Review Loop (Standalone Only)
-
-**Skip if called from /next-task** (review already done).
-
-```javascript
-if (workflowState) {
-  const state = workflowState.readState();
-  const reviewPhase = state?.phases?.history?.find(p => p.phase === 'review-loop');
-  if (reviewPhase?.result?.approved) {
-    SKIP_REVIEW = true;  // Skip to Phase 6
-  }
-}
-```
-
-When running standalone, launch core review passes in parallel (error handling is part of code quality):
-
-```javascript
-const reviewPasses = [
-  { id: 'code-quality', role: 'code quality reviewer' },
-  { id: 'security', role: 'security reviewer' },
-  { id: 'performance', role: 'performance reviewer' },
-  { id: 'test-coverage', role: 'test coverage reviewer' }
-];
-
-// Add specialists based on repo signals (db, architecture, api, frontend, backend, devops)
-// Then launch in parallel:
-reviewPasses.map(pass => Task({
-  subagent_type: "review",
-  prompt: `Role: ${pass.role}. Review PR #${PR_NUMBER} and return JSON findings.`
-}));
-```
-
-Iterate until no open (non-false-positive) issues remain (max 3 iterations if running standalone).
-
-<phase-6>
-## Phase 6: Merge PR
-
-Pre-merge checks (do not skip):
-
-```bash
-# 1. Verify mergeable status
-MERGEABLE=$(gh pr view $PR_NUMBER --json mergeable --jq '.mergeable')
-[ "$MERGEABLE" != "MERGEABLE" ] && { echo "[ERROR] PR not mergeable"; exit 1; }
-
-# 2. Verify all comments resolved (zero unresolved threads)
-# Use separate gh calls for cleaner extraction (avoids cut parsing issues)
-OWNER=$(gh repo view --json owner --jq '.owner.login')
-REPO=$(gh repo view --json name --jq '.name')
-
-# NOTE: Fetches first 100 threads. For PRs with >100 comment threads (rare),
-# implement pagination using pageInfo.hasNextPage and pageInfo.endCursor.
-# This covers 99.9% of PRs - pagination is left as a future enhancement.
-UNRESOLVED=$(gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $pr) {
-        reviewThreads(first: 100) {
-          nodes { isResolved }
-        }
-      }
-    }
-  }
-' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR_NUMBER \
-  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')
-
-if [ "$UNRESOLVED" -gt 0 ]; then
-  echo "[ERROR] Cannot merge: $UNRESOLVED unresolved comment threads"
-  echo "Go back to Phase 4 and address all comments"
-  exit 1
-fi
-
-echo "[OK] All comments resolved"
-
-# 3. Detect if running from a worktree
-IS_WORKTREE="false"
-if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
-  IS_WORKTREE="true"
-  echo "[INFO] Running from worktree - using remote-only merge strategy"
-fi
-
-# 4. Merge with strategy (default: squash)
-STRATEGY=${STRATEGY:-squash}
-if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
-  echo "[ERROR] Failed to extract repo owner/name"
-  exit 1
-fi
-
-if [ "$IS_WORKTREE" = "true" ]; then
-  # In worktree: merge without --delete-branch (it tries to checkout main locally)
-  gh pr merge $PR_NUMBER --$STRATEGY --repo "$OWNER/$REPO"
-  # Delete remote branch separately
-  git push origin --delete "$CURRENT_BRANCH" 2>&1 || echo "[WARN] Remote branch deletion failed - may need manual cleanup"
-  # Get merge SHA from the PR metadata (avoids race condition with fetch)
-  MERGE_SHA=$(gh pr view $PR_NUMBER --repo "$OWNER/$REPO" --json mergeCommit --jq '.mergeCommit.oid')
-else
-  gh pr merge $PR_NUMBER --$STRATEGY --delete-branch
-  # Update local
-  git checkout $MAIN_BRANCH
-  git pull origin $MAIN_BRANCH
-  MERGE_SHA=$(git rev-parse HEAD)
-fi
-
-# Update repo-intel artifact if it exists (non-blocking)
-node -e "const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT; if (!pluginRoot) { console.log('CLAUDE_PLUGIN_ROOT not set, skipping repo-intel update'); process.exit(0); } const { repoMap } = require(\`\${pluginRoot}/lib/agentsys\`).get(); if (!repoMap) { console.log('agentsys repo-map module unavailable, skipping repo-intel update'); process.exit(0); } if (repoMap.exists(process.cwd())) { repoMap.update(process.cwd(), {}).then(() => console.log('[OK] Repo-intel updated')).catch((e) => console.log('[WARN] Repo-intel update failed: ' + e.message)); } else { console.log('No cached repo-intel.json, skipping update'); }" || true
-echo "[OK] Merged PR #$PR_NUMBER at $MERGE_SHA"
-```
-</phase-6>
-
-## Phases 7-10: Deploy & Validate
-
-**Skip if `WORKFLOW="single-branch"`**
-
-See `ship-deployment.md` for platform-specific details:
-- Phase 7: Deploy to Development (Railway, Vercel, Netlify)
-- Phase 8: Validate Development (health checks, smoke tests)
-- Phase 9: Deploy to Production (merge to prod branch)
-- Phase 10: Validate Production (with auto-rollback on failure)
+Multi-branch repos only. Deploy to development, validate, promote to production, validate, and roll back on failure. Platform commands and the rollback procedure are in `ship-deployment.md`.
 
 ## Phase 11: Cleanup
 
-```bash
-# Clean up worktrees
-git worktree list --porcelain | grep "worktree" | grep -v "$(git rev-parse --show-toplevel)" | while read -r wt; do
-  WORKTREE_PATH=$(echo $wt | awk '{print $2}')
-  git worktree remove $WORKTREE_PATH --force 2>/dev/null || true
-done
+- Under `--state-file`: if the flow state's `git.worktreePath` is the worktree `/next-task` created for this task, remove it from the main repo after the merge, then delete its local branch. Use `git -C <git.mainRepoPath> worktree remove <path>` without `--force`. If it has uncommitted changes, leave it and report it. Release the task entry with `releaseTask(<task.id>, <mainRepoPath>)` from `lib/state/workflow-state.js`.
+- Standalone, outside a worktree: switch to the target branch and delete the merged local branch with `git branch -d`.
+- Standalone, inside a worktree you did not create in this run: leave it.
+- GitHub task from `/next-task`: comment on the issue with the PR number and merge commit, then `gh issue close <id> --reason completed`.
+
+## Phase 12: Report
+
+```
+## Shipped
+PR: #<n> <url> | Merged to <target> at <sha> (or: ready for maintainer review)
+CI: <passed checks> | Review: <threads fixed>/<threads answered>
+Deploy: <dev url> [OK] | <prod url> [OK]   (or: single-branch, merge is the deploy)
+Cleanup: <what was removed, what was left and why>
 ```
 
-### Close GitHub Issue (if applicable)
-
-If the task came from a GitHub issue, close it with a completion comment:
-
-```bash
-if [ -n "$TASK_ID" ] && [ "$TASK_SOURCE" = "github" ]; then
-  # Post completion comment
-  gh issue comment "$TASK_ID" --body "$(cat <<'EOF'
-[DONE] **Task Completed Successfully**
-
-**PR**: #${PR_NUMBER}
-**Status**: Merged to ${MAIN_BRANCH}
-**Commit**: ${MERGE_SHA}
-
-### Summary
-- Implementation completed as planned
-- All review comments addressed
-- CI checks passed
-- Merged successfully
-
----
-_This issue was automatically processed by AgentSys /next-task workflow._
-_Closing issue as the work has been completed and merged._
-EOF
-)"
-
-  # Close the issue
-  gh issue close "$TASK_ID" --reason completed
-
-  echo "[OK] Closed issue #$TASK_ID with completion comment"
-fi
-```
-
-### Remove Task from Registry
-
-```javascript
-// Remove completed task from ${STATE_DIR}/tasks.json
-if (workflowState) {
-  const state = workflowState.readState();
-  const mainRepoPath = state?.git?.mainRepoPath || process.cwd();
-  const taskId = state?.task?.id;
-
-  if (taskId) {
-    const registryPath = path.join(mainRepoPath, '.claude', 'tasks.json');
-    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
-    registry.tasks = registry.tasks.filter(t => t.id !== taskId);
-    fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
-    console.log(`[OK] Removed task #${taskId} from registry`);
-  }
-}
-```
-
-### Local Branch Cleanup
-
-```bash
-# Re-detect worktree in case Phase 6 was skipped or run separately
-if [ -z "$IS_WORKTREE" ]; then
-  IS_WORKTREE="false"
-  if [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.git" ]; then
-    IS_WORKTREE="true"
-  fi
-fi
-
-if [ "$IS_WORKTREE" = "true" ]; then
-  echo "[OK] Local branch cleanup deferred (worktree mode - cleaned when worktree is removed)"
-else
-  git checkout $MAIN_BRANCH
-  git branch -D $CURRENT_BRANCH 2>/dev/null || true
-fi
-```
-
-## Phase 12: Completion Report
-
-```markdown
-# Deployment Complete
-
-## Pull Request
-**Number**: #${PR_NUMBER} | **Status**: Merged to ${MAIN_BRANCH}
-
-## Review Results
-- Code Quality: [OK] | Error Handling: [OK] | Test Coverage: [OK] | CI: [OK]
-
-## Deployments
-${WORKFLOW === 'dev-prod' ?
-  `Development: ${DEV_URL} [OK] | Production: ${PROD_URL} [OK]` :
-  `Production: Deployed to ${MAIN_BRANCH}`}
-
-[OK] Successfully shipped!
-```
-
-### Workflow Hook Response
-
-After displaying the completion report, output JSON for the SubagentStop hook:
+Then print this line on its own. `/next-task` reads it to detect completion:
 
 ```json
 {"ok": true, "nextPhase": "completed", "status": "shipped"}
 ```
 
-This allows the `/next-task` workflow to detect that `/ship` completed successfully.
-
-## Error Handling
-
-See `ship-error-handling.md` for detailed error handling:
-- GitHub CLI not available
-- CI failures
-- Merge conflicts
-- Deployment failures
-- Production validation failures with rollback
-
-## Important Notes
-
-- Requires GitHub CLI (gh) for PR workflow
-- Auto-adapts to single-branch or multi-branch workflow
-- Platform-specific CI and deployment monitoring
-- Automatic rollback on production failures
-- Respects project conventions (commit style, PR format)
-
-Begin Phase 1 now.
+Failures and recovery messages: `ship-error-handling.md`.

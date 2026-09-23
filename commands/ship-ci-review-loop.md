@@ -1,472 +1,80 @@
 ---
-description: "Use when monitoring CI and handling review comments during /ship. Details mandatory wait periods, auto-reviewer handling, and comment resolution."
-codex-description: "Use when monitoring CI and handling review comments during /ship. Details mandatory wait periods, auto-reviewer handling, and comment resolution."
+description: "Use when monitoring CI and handling review comments during /ship. Covers waiting for checks and review bots without sleeps, triaging feedback, replying and resolving threads."
+codex-description: "Use when monitoring CI and handling review comments during /ship. Covers waiting for checks and review bots without sleeps, triaging feedback, replying and resolving threads."
 ---
 
-<ci-review-loop>
-# Phase 4: CI & Review Monitor Loop - Reference
+# /ship Phase 4: CI and review loop
 
-This file contains detailed implementation for the CI & Review Monitor Loop phase of `/ship`.
+Reference for `/ship` Phase 4. Goal: the PR's current head has green checks, and every piece of review feedback has been fixed or answered. Each round is: wait for CI, fix failures, collect feedback, handle it, push. Stop after 5 rounds without converging and report what is left.
 
-**Parent document**: `ship.md`
+## Waiting for CI
 
----
-
-<mandatory-requirements>
-## This Phase Is Mandatory
-
-This is not optional. You must:
-1. Wait the full 3 minutes for auto-reviewers
-2. Run the monitor loop (not just check once)
-3. Address all comments before merge
-</mandatory-requirements>
-
----
-
-<pr-auto-review>
-## PR Auto-Review Process
-
-PRs receive automatic reviews from configured auto-reviewers (Copilot, Gemini, CodeRabbit, etc.).
-
-**Mandatory workflow:**
-1. After PR creation, wait **at least 3 minutes** for first review round
-2. Read **all comments** from all reviewers
-3. Address **every comment** - no exceptions
-4. Iterate until **zero unresolved threads** (typically 2-4 rounds)
-
-**Rules:**
-- Always address all comments, including "minor" or "nit" suggestions
-- Do not skip a comment unless factually wrong or user-approved
-- Treat all feedback as **required changes**, not suggestions
-</pr-auto-review>
-
----
-
-<overview>
-## Overview
-
-The monitor loop must wait for:
-1. CI to pass
-2. All comments resolved (addressed or replied to)
-3. No "changes requested" reviews remain
-
-## Why All Comments Matter
-
-**Every comment must be addressed:**
-- Critical/High issues: Fix immediately
-- Medium issues: Fix (don't defer)
-- Minor/Nit issues: Fix (shows attention to quality)
-- Style suggestions: Fix (maintains codebase consistency)
-- Questions: Answer with explanation
-- False positives: Reply explaining why, then resolve
-- Not relevant: Reply explaining why, then resolve
-
-Do not ignore comments. Do not leave comments unresolved. A clean PR has zero unresolved conversations.
-</overview>
-
-## The Monitor Loop Algorithm
-
-> **Note:** The JavaScript below is **conceptual pseudocode** showing the algorithm flow.
-> Implement using bash functions defined in this file.
-
-```javascript
-const MAX_ITERATIONS = 10;  // Safety limit
-const INITIAL_WAIT_MS = 180000;  // 3 minutes - wait for auto-reviews
-const ITERATION_WAIT_MS = 30000;  // 30 seconds between iterations
-let iteration = 0;
-
-while (iteration < MAX_ITERATIONS) {
-  iteration++;
-  console.log(`\n## CI & Review Monitor - Iteration ${iteration}`);
-
-  // Step 1: Wait for CI to complete
-  const ciStatus = await waitForCI();
-  if (ciStatus === 'failed') {
-    await fixCIFailures();
-    continue;  // Push fix, re-run CI
-  }
-
-  // Step 1.5: First iteration only - wait for auto-reviews
-  if (iteration === 1) {
-    console.log("Waiting 3 minutes for auto-reviews...");
-    await sleep(INITIAL_WAIT_MS);
-  }
-
-  // Step 2: Check for PR comments and reviews
-  const feedback = await checkPRFeedback();
-
-  if (feedback.unresolvedCount === 0 && !feedback.changesRequested) {
-    console.log("[OK] CI passed, all comments resolved");
-    break;  // Ready to merge!
-  }
-
-  // Step 3: Address ALL feedback
-  await addressAllFeedback(PR_NUMBER);
-
-  // Step 4: Push fixes
-  if (feedback.hasCodeChanges) {
-    await commitAndPush(`fix: address review feedback (iteration ${iteration})`);
-  }
-
-  // Step 5: Sleep before next check
-  await sleep(ITERATION_WAIT_MS);
-}
-```
-
-## Step 1: Wait for CI
+Block on the checks instead of polling:
 
 ```bash
-wait_for_ci() {
-  echo "Waiting for CI checks..."
-
-  while true; do
-    CHECKS=$(gh pr checks $PR_NUMBER --json name,state 2>/dev/null || echo "[]")
-
-    PENDING=$(echo "$CHECKS" | jq '[.[] | select(.state | IN("PENDING", "QUEUED", "IN_PROGRESS"))] | length')
-    FAILED=$(echo "$CHECKS" | jq '[.[] | select(.state | IN("FAILURE", "CANCELLED"))] | length')
-    PASSED=$(echo "$CHECKS" | jq '[.[] | select(.state=="SUCCESS")] | length')
-
-    if [ "$FAILED" -gt 0 ]; then
-      echo "[ERROR] CI failed ($FAILED checks)"
-      gh pr checks $PR_NUMBER
-      return 1
-    elif [ "$PENDING" -eq 0 ] && [ "$PASSED" -gt 0 ]; then
-      echo "[OK] CI passed ($PASSED checks)"
-      return 0
-    elif [ "$PENDING" -eq 0 ] && [ "$PASSED" -eq 0 ]; then
-      echo "[WARN] No CI checks found, proceeding..."
-      return 0
-    fi
-
-    echo "  Waiting... ($PENDING pending, $PASSED passed)"
-    sleep 15
-  done
-}
+gh pr checks "$PR" --watch --interval 30   # returns when all checks finish, non-zero if any failed
 ```
 
-## Step 2: Check PR Feedback
+Run it in the background if the harness supports that, and do other work (reading feedback) while it runs. If `gh` reports no checks at all, the repo has no CI: note it and move on.
+
+On a failure, read the failing job's log (`gh run view <run-id> --log-failed`), fix the cause, commit, push, and wait again. If `next-task:ci-fixer` is installed and `Task` is available you may delegate the fix to it with the check name and log excerpt. Otherwise fix it yourself. Do not weaken a test, disable a lint rule, or skip a check to get green: the check exists to catch exactly that change.
+
+## Waiting for review bots
+
+Many AI reviewers (a Claude or Codex review workflow, CodeRabbit, Gemini, Copilot) run as checks, so `--watch` already covers them. Some post as a GitHub App with no check run. If recent merged PRs in this repo show such a bot reviewing, wait for its first review on this PR before calling the PR clean. Use one bounded background wait, not a fixed sleep:
 
 ```bash
-check_pr_feedback() {
-  local pr_number=$1
+timeout 900 bash -c 'until [ "$(gh pr view '"$PR"' --json reviews -q ".reviews | length")" -gt 0 ]; do sleep 30; done'
+```
 
-  echo "Checking PR feedback..."
+If it times out, proceed and mention it in the report. No sign of review bots on recent PRs means no wait.
 
-  # Extract owner and repo from git remote
-  REPO_INFO=$(gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"')
-  OWNER=$(echo "$REPO_INFO" | cut -d'/' -f1)
-  REPO=$(echo "$REPO_INFO" | cut -d'/' -f2)
+## Collecting feedback
 
-  # Get review state
-  REVIEWS=$(gh pr view $pr_number --json reviews --jq '.reviews')
-  CHANGES_REQUESTED=$(echo "$REVIEWS" | jq '[.[] | select(.state=="CHANGES_REQUESTED")] | length')
+Unresolved review threads (first 100; paginate with `pageInfo` if a PR ever has more):
 
-  # Get unresolved review threads
-  # NOTE: Fetches first 100 threads. For PRs with >100 threads, implement pagination.
-  UNRESOLVED_THREADS=$(gh api graphql -f query='
-    query($owner: String!, $repo: String!, $pr: Int!) {
-      repository(owner: $owner, name: $repo) {
-        pullRequest(number: $pr) {
-          reviewThreads(first: 100) {
-            nodes {
-              isResolved
-            }
-          }
+```bash
+gh api graphql -f query='
+  query($owner: String!, $repo: String!, $pr: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $pr) {
+        reviewThreads(first: 100) {
+          nodes { id isResolved path line comments(first: 20) { nodes { id databaseId author { login } body } } }
         }
       }
     }
-  ' -f owner="$OWNER" -f repo="$REPO" -F pr=$pr_number \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')
-
-  echo "  Unresolved threads: $UNRESOLVED_THREADS"
-  echo "  Changes requested: $CHANGES_REQUESTED"
-
-  echo "{\"unresolvedThreads\": $UNRESOLVED_THREADS, \"changesRequested\": $CHANGES_REQUESTED}"
-}
+  }' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR" \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'
 ```
 
-### Get Full Thread Details
+Also read top-level review bodies and PR comments (`gh pr view "$PR" --json reviews,comments`), since some reviewers put findings there instead of in threads. `CHANGES_REQUESTED` reviews count as open feedback.
+
+## Handling feedback
+
+Judge each item on its merits:
+
+- Correct and in scope: fix it. Nits count when the fix is cheap and clearly right.
+- Wrong, or already handled: reply once with the reason (point at the line or commit). Do not change code to appease a wrong comment.
+- Correct but out of scope: reply saying so, and open a follow-up issue only on a repo you own.
+- A question: answer it.
+
+On a repo you own, resolve each thread after fixing or answering it, and re-request review from anyone who requested changes. On a repo you do not own, never resolve threads (the maintainer decides), reply only where a maintainer or a reviewer they rely on asked something, and fold everything else into the PR body.
+
+Reply to a review comment and resolve its thread:
 
 ```bash
-get_unresolved_threads() {
-  local pr_number=$1
-
-  REPO_INFO=$(gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"')
-  OWNER=$(echo "$REPO_INFO" | cut -d'/' -f1)
-  REPO=$(echo "$REPO_INFO" | cut -d'/' -f2)
-
-  # NOTE: Fetches first 100 threads. For PRs with >100, implement pagination.
-  gh api graphql -f query='
-    query($owner: String!, $repo: String!, $pr: Int!) {
-      repository(owner: $owner, name: $repo) {
-        pullRequest(number: $pr) {
-          reviewThreads(first: 100) {
-            nodes {
-              id
-              isResolved
-              path
-              line
-              diffHunk
-              comments(first: 1) {
-                nodes {
-                  id
-                  body
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  ' -f owner="$OWNER" -f repo="$REPO" -F pr=$pr_number \
-    --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'
-}
+gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_DATABASE_ID/replies" -f body="$REPLY"
+gh api graphql -f query='mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' -f id="$THREAD_ID"
 ```
 
-## Step 3: Address ALL Feedback
+## Pushing fixes
 
-> **Note:** This is **conceptual pseudocode** showing the algorithm flow.
-> Implement using: gh api, Read, Edit, Task (ci-fixer), etc.
+Commit fixes with a message that names what changed (not "address review feedback"), push normally, and start the next round. Rounds without code changes (replies only) still end with a check that nothing new arrived.
 
-```javascript
-async function addressAllFeedback(prNumber) {
-  const threads = await getUnresolvedThreads(prNumber);
+## Round summary
 
-  console.log(`\nAddressing ${threads.length} unresolved threads...`);
+After each round, print one line:
 
-  for (const thread of threads) {
-    console.log(`\n--- Thread: ${thread.path}:${thread.line} ---`);
-    const analysis = analyzeComment(thread);
-
-    switch (analysis.type) {
-      case 'code_fix_required':
-        console.log(`Action: Fixing code issue`);
-        await implementFix(thread);  // Use Task(ci-fixer) or Edit tool
-        break;
-
-      case 'style_suggestion':
-        console.log(`Action: Applying style fix`);
-        await implementFix(thread);
-        break;
-
-      case 'question':
-        console.log(`Action: Answering question`);
-        await replyToComment(prNumber, thread.commentId, generateAnswer(thread));
-        await resolveThread(thread.id);
-        break;
-
-      case 'false_positive':
-        console.log(`Action: Explaining false positive`);
-        await replyToComment(prNumber, thread.commentId,
-          `This is a false positive because: ${analysis.reason}\n\n` +
-          `Resolving. Please reopen if you disagree.`
-        );
-        await resolveThread(thread.id);
-        break;
-
-      case 'not_relevant':
-        console.log(`Action: Explaining out of scope`);
-        await replyToComment(prNumber, thread.commentId,
-          `Outside scope of this PR: ${analysis.reason}\n\n` +
-          `Resolving. Please reopen if needed.`
-        );
-        await resolveThread(thread.id);
-        break;
-
-      case 'already_addressed':
-        console.log(`Action: Confirming addressed`);
-        await replyToComment(prNumber, thread.commentId,
-          `Addressed in commit ${gitRevParseHead}.`
-        );
-        await resolveThread(thread.id);
-        break;
-    }
-  }
-
-  // Request re-review from those who requested changes
-  const changesRequestedReviews = await getChangesRequestedReviews(prNumber);
-  for (const review of changesRequestedReviews) {
-    await requestReReview(prNumber, review.author);
-  }
-}
 ```
-
-## Comment Analysis Heuristics
-
-> **Note:** Classification heuristics for comment handling.
-
-```javascript
-function analyzeComment(thread) {
-  const body = thread.body.toLowerCase();
-
-  // Question patterns
-  if (body.includes('?') || body.startsWith('why') || body.startsWith('how') ||
-      body.startsWith('what') || body.startsWith('could you explain')) {
-    return { type: 'question', reason: 'Comment is a question' };
-  }
-
-  // Style/nit patterns
-  if (body.includes('nit:') || body.includes('nitpick') || body.includes('minor:') ||
-      body.includes('style:') || body.includes('consider') || body.includes('optional')) {
-    return { type: 'style_suggestion', reason: 'Style or minor suggestion' };
-  }
-
-  // Out of scope patterns
-  if (!thread.diffHunk || commentRefersToUnchangedCode(thread)) {
-    return { type: 'not_relevant', reason: 'Comment refers to unchanged code' };
-  }
-
-  // Default: treat as code fix required
-  return { type: 'code_fix_required', reason: 'Valid code feedback' };
-}
+[CI/Review] round <n>: CI <passed|failed|none> | fixed <a> | answered <b> | open <c>
 ```
-
-## Implementing Fixes
-
-Use the ci-fixer agent for code changes:
-
-```javascript
-Task({
-  subagent_type: "next-task:ci-fixer",
-  prompt: `Fix the following review comment:
-
-**File**: ${thread.path}
-**Line**: ${thread.line}
-**Comment**: ${thread.body}
-**Code Context**:
-\`\`\`
-${thread.diffHunk}
-\`\`\`
-
-Requirements:
-1. Make the minimal change to address the feedback
-2. Do NOT over-engineer or add unrelated changes
-3. Ensure tests still pass after the fix`
-});
-```
-
-## Resolving Threads
-
-```bash
-resolve_thread() {
-  local thread_id=$1
-
-  gh api graphql -f query='
-    mutation($threadId: ID!) {
-      resolveReviewThread(input: {threadId: $threadId}) {
-        thread {
-          isResolved
-        }
-      }
-    }
-  ' -f threadId="$thread_id"
-}
-
-reply_to_comment() {
-  local pr_number=$1
-  local comment_id=$2
-  local body=$3
-
-  REPO_INFO=$(gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"')
-  OWNER=$(echo "$REPO_INFO" | cut -d'/' -f1)
-  REPO=$(echo "$REPO_INFO" | cut -d'/' -f2)
-
-  gh api -X POST "repos/$OWNER/$REPO/pulls/$pr_number/comments" \
-    -f body="$body" \
-    -F in_reply_to="$comment_id"
-}
-```
-
-## Step 4: Commit and Push
-
-```bash
-commit_and_push_fixes() {
-  local message=$1
-  local branch=${2:-$(git branch --show-current)}
-
-  if [ -n "$(git status --porcelain)" ]; then
-    git add -A
-    git commit -m "$message"
-    git push origin "$branch"
-    echo "[OK] Pushed fixes"
-    return 0
-  else
-    echo "No code changes to commit (only comment replies)"
-    return 1
-  fi
-}
-```
-
-## Complete Loop Script
-
-```bash
-#!/bin/bash
-# Phase 4: CI & Review Monitor Loop
-
-MAX_ITERATIONS=10
-INITIAL_WAIT=${SHIP_INITIAL_WAIT:-180}  # Configurable via env var
-ITERATION_WAIT=30
-iteration=0
-
-while [ $iteration -lt $MAX_ITERATIONS ]; do
-  iteration=$((iteration + 1))
-  echo "[CI Monitor] Iteration $iteration"
-
-  # Step 1: Wait for CI
-  if ! wait_for_ci; then
-    echo "CI failed - launching ci-fixer agent..."
-    continue
-  fi
-
-  # Step 1.5: First iteration - wait for auto-reviews
-  if [ $iteration -eq 1 ] && [ "$INITIAL_WAIT" -gt 0 ]; then
-    echo "First iteration - waiting ${INITIAL_WAIT}s for auto-reviews..."
-    sleep $INITIAL_WAIT
-  fi
-
-  # Step 2: Check feedback
-  FEEDBACK=$(check_pr_feedback $PR_NUMBER)
-  UNRESOLVED=$(echo "$FEEDBACK" | jq -r '.unresolvedThreads')
-  CHANGES_REQ=$(echo "$FEEDBACK" | jq -r '.changesRequested')
-
-  if [ "$UNRESOLVED" -eq 0 ] && [ "$CHANGES_REQ" -eq 0 ]; then
-    echo "[OK] ALL CHECKS PASSED"
-    echo "[OK] ALL COMMENTS RESOLVED"
-    echo "Ready to merge!"
-    break
-  fi
-
-  # Step 3: Address all feedback
-  echo "Addressing $UNRESOLVED unresolved threads..."
-
-  # Step 4: Commit and push
-  commit_and_push_fixes "fix: address review feedback (iteration $iteration)"
-
-  # Step 5: Wait before next iteration
-  echo "Waiting ${ITERATION_WAIT}s..."
-  sleep $ITERATION_WAIT
-done
-
-if [ $iteration -ge $MAX_ITERATIONS ]; then
-  echo "[ERROR] Max iterations reached - manual intervention required"
-  exit 1
-fi
-```
-
-<iteration-summary>
-## Iteration Summary Output
-
-```markdown
-## Iteration ${iteration} Summary
-
-**CI Status**: [OK] Passed
-**Comments Addressed**: ${addressedCount}
-  - Code fixes: ${codeFixCount}
-  - Answered questions: ${questionCount}
-  - Resolved as not applicable: ${notApplicableCount}
-**Remaining Unresolved**: ${remainingCount}
-
-${remainingCount > 0 ? 'Continuing...' : 'Ready to merge!'}
-```
-</iteration-summary>
-</ci-review-loop>
