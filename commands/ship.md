@@ -21,8 +21,8 @@ Parse from `$ARGUMENTS`:
 
 ## Constraints
 
-- Never force-push a branch other people build on (the base branch, a production branch). Production rollback uses `git revert`, not a reset.
-- Stage files by name, never `.env`, keys, or credentials. A leaked secret in a public PR is not recoverable by a later commit.
+- Do not force-push a branch other people build on (the base branch, a production branch). Production rollback uses `git revert`, not a reset.
+- Stage files by name, and leave out `.env`, keys and credentials. A leaked secret in a public PR is not recoverable by a later commit.
 - Clean up only what this run or the `/next-task` run that called it created: its own worktree, its own local branch, its own task registry entry. Other worktrees and branches may be another agent's live work.
 - On a repo where you lack write access (a fork PR to an upstream project), do not merge, do not resolve maintainers' threads, and reply only where a maintainer asked something. Stop at "ready for review" and report. Maintainers read a queue, and extra comments cost them.
 - Do not post to an issue tracker unless the run came from `/next-task` with a GitHub task source. The plan approval in `/next-task` is the user's consent for those comments.
@@ -44,7 +44,7 @@ TOOLS=$(node "${CLAUDE_PLUGIN_ROOT}/lib/platform/verify-tools.js")         # .gh
 
 Stop with install and `gh auth login` instructions if `gh` is missing. Stop if the current branch is the target branch: shipping needs a feature branch.
 
-Resolve the target branch: `--base`, then the flow state's `git.baseBranch`, then `mainBranch`. If it differs from the repo default and the run is interactive (no `--state-file`), confirm it with the user. Under `--state-file`, trust the flow state.
+Resolve the target branch as in Arguments, falling back to `mainBranch`. If it differs from the repo default and the run is interactive (no `--state-file`), confirm it with the user. Under `--state-file`, trust the flow state.
 
 `branchStrategy: multi-branch` means a dev and a production branch (`stable` by default). Phases 7 to 10 only run in that case.
 
@@ -121,7 +121,7 @@ Only after a merge (`gh pr view <n> --json state` is `MERGED`). If the PR is sti
 - Standalone, inside a worktree you did not create in this run: leave it.
 - GitHub task from `/next-task`: comment on the issue with the PR number and merge commit, then `gh issue close <id> --reason completed`.
 
-Delete a merged branch with `git branch -D`: after a squash or rebase merge git does not see it as merged, and the PR state already confirms the merge. Only delete branches this run shipped.
+Delete a merged branch with `git branch -D`: after a squash or rebase merge git does not see it as merged, and the PR state already confirms the merge.
 
 ## Phase 12: Report
 

@@ -59,7 +59,7 @@ Judge each item on its merits:
 - Correct but out of scope: reply saying so, and open a follow-up issue only on a repo you own.
 - A question: answer it.
 
-On a repo you own, resolve each thread after fixing or answering it, and re-request review from anyone who requested changes. On a repo you do not own, never resolve threads (the maintainer decides), reply only where a maintainer or a reviewer they rely on asked something, and fold everything else into the PR body.
+On a repo you own, resolve each thread after fixing or answering it, and re-request review from anyone who requested changes. On a repo you do not own, leave threads unresolved (the maintainer decides), reply only where a maintainer or a reviewer they rely on asked something, and fold everything else into the PR body.
 
 Reply to a review comment and resolve its thread:
 
