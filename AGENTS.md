@@ -35,10 +35,9 @@ An agentsys plugin: Markdown prompts in `commands/`, `agents/` and `skills/`, an
 ## Dev commands
 
 ```bash
+npm test                        # node --test tests/*.test.js, also run in CI and by the pre-push hook
 agnix --config .agnix.toml .    # agent config lint, also run in CI
 ```
-
-`package.json` has no `test` script yet, so CI and the pre-push hook skip tests.
 
 ## References
 

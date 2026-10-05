@@ -5,7 +5,7 @@
 ### Changed
 
 - Second pass over the prompts for current models: "Never" rules read as plain instructions with their reasons, and /ship Phase 1 no longer restates the target-branch defaults from Arguments. The command, agent, skill and AGENTS.md files went from 5,202 to 5,171 words.
-- AGENTS.md drops the generic model table and the GPU validation text this CPU-only repo does not need, lists the commands that exist (agnix; there is no `npm test` or `npm run validate` script), and gains an Overview that says `lib/` is synced from agent-core.
+- AGENTS.md drops the generic model table and the GPU validation text this CPU-only repo does not need, lists the commands that exist (`npm test` and agnix; there is no `npm run validate` script), and gains an Overview that says `lib/` is synced from agent-core.
 
 ### Fixed
 
