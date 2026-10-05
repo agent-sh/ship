@@ -5,7 +5,12 @@
 ### Changed
 
 - Second pass over the prompts for current models: "Never" rules read as plain instructions with their reasons, and /ship Phase 1 no longer restates the target-branch defaults from Arguments. The command, agent, skill and AGENTS.md files went from 5,202 to 5,171 words.
-- AGENTS.md drops the generic model table and the GPU validation text this CPU-only repo does not need, lists the commands that exist (agnix; there is no `npm test` or `npm run validate` script), and gains an Overview that says `lib/` is synced from agent-core.
+- AGENTS.md drops the generic model table and the GPU validation text this CPU-only repo does not need, lists the commands that exist (`npm test` and agnix; there is no `npm run validate` script), and gains an Overview that says `lib/` is synced from agent-core.
+
+### Fixed
+
+- `lib/agentsys.js` is back. The 2026-04-25 lib sync (#25) ran the old mirroring sync (`rm -rf lib && cp`), which deleted it, but `/release` still requires it for the pre-release health check, so that check was always skipped with a `Cannot find module` reason. The file now comes from agent-core: the copy enhance, deslop and drift-detect carry, with agent-core#32's refreshed header comment.
+- `npm test` runs `tests/*.test.js`, so CI runs the resolver tests. They failed 7 of 7 without the resolver, and nothing ran them.
 
 ## [1.2.0] - 2026-09-24
 

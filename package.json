@@ -20,5 +20,8 @@
     "automation",
     "railway",
     "vercel"
-  ]
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
 }
