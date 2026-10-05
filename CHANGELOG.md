@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- `lib/agentsys.js` is back. The 2026-04-25 lib sync (#25) ran the old mirroring sync (`rm -rf lib && cp`), which deleted it, but `/release` still requires it for the pre-release health check, so that check was always skipped with a `Cannot find module` reason. The file now comes from agent-core, the same copy enhance, deslop and drift-detect carry.
+- `lib/agentsys.js` is back. The 2026-04-25 lib sync (#25) ran the old mirroring sync (`rm -rf lib && cp`), which deleted it, but `/release` still requires it for the pre-release health check, so that check was always skipped with a `Cannot find module` reason. The file now comes from agent-core: the copy enhance, deslop and drift-detect carry, with agent-core#32's refreshed header comment.
 - `npm test` runs `tests/*.test.js`, so CI runs the resolver tests. They failed 7 of 7 without the resolver, and nothing ran them.
 
 ## [1.2.0] - 2026-09-24
