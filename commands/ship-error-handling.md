@@ -11,7 +11,7 @@ Reference for `/ship`. When a phase fails, stop that phase, tell the user what f
 |---|---|---|
 | `gh` missing or not authenticated | `[ERROR] GitHub CLI (gh) required` | Install from https://cli.github.com, then `gh auth login` |
 | On the target branch | `[ERROR] Cannot ship from <target>` | Create a feature branch and re-run |
-| Push rejected | The rejection reason | Auth: `gh auth status`. Protected branch: push a feature branch instead. Behind remote: `git pull --rebase origin <branch>`, never a force push over someone else's commits |
+| Push rejected | The rejection reason | Auth: `gh auth status`. Protected branch: push a feature branch instead. Behind remote: `git pull --rebase origin <branch>`, not a force push over someone else's commits |
 | PR creation failed | The `gh` error | Existing PR: `gh pr list --head <branch>`. No commits: `git log <target>..HEAD` |
 | CI failure you could not fix | Check name, failing log excerpt, what you tried | The user fixes and pushes, then re-runs `/ship` |
 | Merge conflict with the target | Conflicting files | `git fetch origin && git merge origin/<target>`, resolve, push, re-run. Rebase instead only if the branch is yours alone, then `git push --force-with-lease` |

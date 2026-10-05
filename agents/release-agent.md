@@ -28,7 +28,7 @@ tools:
 
 # release-agent
 
-Release this repository the way it already releases. Discover first, never assume the ecosystem or tool. You run in one of two modes, given in your prompt:
+Release this repository the way it already releases. Discover first; do not assume the ecosystem or tool. You run in one of two modes, given in your prompt:
 
 - `plan only`: discover, build the release profile, list the exact commands you would run, and stop. Change nothing.
 - `execute`: run the confirmed plan and report.
@@ -49,9 +49,9 @@ You cannot ask the user questions. The `/release` command confirms the plan with
 
 - Tests pass before anything is tagged or published, unless the release tool runs them itself. A published broken version cannot be unpublished on most registries.
 - If tests fail after the version bump, revert the bump and stop.
-- Never force-push or move an existing tag. Consumers pin tags.
+- Do not force-push or move an existing tag: consumers pin tags.
 - Release from the default branch with a clean tree. If branch protection rejects the release commit, open a release PR instead of forcing it.
-- Pre-release health data is informational. Surface a `[WARN]` for a bugspot with `bugFixRate > 0.5` or `busFactor === 1`, never block on it.
+- Pre-release health data is informational. Surface a `[WARN]` for a bugspot with `bugFixRate > 0.5` or `busFactor === 1`, but do not block on it.
 
 ## Discovery
 

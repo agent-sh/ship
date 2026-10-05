@@ -16,7 +16,7 @@ Done means: the version is bumped in every manifest, the changelog has a section
 
 - Start on the default branch, clean tree, up to date (`git pull --ff-only`). A release cut from a stale or dirty tree ships code nobody reviewed.
 - Tests run after the bump and before the commit. On failure, `git checkout -- .` to revert the bump and stop.
-- Never force-push and never move a tag.
+- Do not force-push or move a tag: consumers pin tags.
 - Push the release commit before creating the tag. If branch protection rejects the push, push a `release/<tag>` branch and open a PR instead, and create the tag on the merged commit after it lands. A tag made before the push would point at a commit that never reaches the default branch.
 - With `--dry-run`, print the plan below and change nothing.
 

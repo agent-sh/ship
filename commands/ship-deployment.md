@@ -50,7 +50,7 @@ Before the merge above: if an earlier run rolled production back (a `Revert "Mer
 
 Wait for the production deploy, then run the same health check, platform status, and `smoke-test:prod` script (with `SMOKE_TEST_URL=<prod-url>`). Any failure triggers rollback.
 
-Base the health decision on the platform status API and the HTTP probe, never on counting words like "error" in application logs. Logs echo user-controlled input, so anyone who can get a string logged could force a production rollback. With no platform API, fall back to the conclusion of the last deploy workflow runs on the production branch (`gh run list --branch "$PROD_BRANCH" --limit 3 --json conclusion`).
+Base the health decision on the platform status API and the HTTP probe, not on counting words like "error" in application logs. Logs echo user-controlled input, so anyone who can get a string logged could force a production rollback. With no platform API, fall back to the conclusion of the last deploy workflow runs on the production branch (`gh run list --branch "$PROD_BRANCH" --limit 3 --json conclusion`).
 
 ## Rollback
 
