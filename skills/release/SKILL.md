@@ -1,7 +1,7 @@
 ---
 name: release
 description: "Generic release workflow for repositories without a dedicated release tool. Handles version bump, changelog, test, tag, push, GitHub release, and optional publish."
-version: 0.3.0
+version: 0.4.0
 argument-hint: "[patch|minor|major] [--dry-run] [--skip-publish] [--skip-changelog] [--profile=JSON]"
 disable-model-invocation: true
 ---
