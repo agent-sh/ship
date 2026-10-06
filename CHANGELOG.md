@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-06
+
 ### Changed
 
 - Second pass over the prompts for current models: "Never" rules read as plain instructions with their reasons, and /ship Phase 1 no longer restates the target-branch defaults from Arguments. The command, agent, skill and AGENTS.md files went from 5,202 to 5,171 words.
